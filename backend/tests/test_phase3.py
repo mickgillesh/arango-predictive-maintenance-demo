@@ -67,9 +67,9 @@ def test_readings_default_sensors() -> None:
     data = r.json()
     assert data["engineId"] == "48"
     assert data["sensors"]  # non-empty
-    assert data["series"]
+    assert data["readings"]
     # Cycles must be present in every row
-    assert all("cycle" in row for row in data["series"])
+    assert all("cycle" in row for row in data["readings"])
 
 
 def test_readings_explicit_sensors() -> None:
@@ -78,7 +78,7 @@ def test_readings_explicit_sensors() -> None:
     data = r.json()
     assert set(data["sensors"]) == {"s9", "s14"}
     # Each row should have cycle, s9, s14
-    row = data["series"][0]
+    row = data["readings"][0]
     assert "s9" in row and "s14" in row
 
 
@@ -86,12 +86,12 @@ def test_readings_downsampled_to_at_most_500() -> None:
     # FD001 max ~362 cycles — all engines stay under 500, but the cap must hold
     r = client.get("/api/engines/1/readings?sensors=s2")
     assert r.status_code == 200
-    assert len(r.json()["series"]) <= 500
+    assert len(r.json()["readings"]) <= 500
 
 
 def test_readings_cycles_ascending() -> None:
     r = client.get("/api/engines/48/readings?sensors=s9")
-    cycles = [row["cycle"] for row in r.json()["series"]]
+    cycles = [row["cycle"] for row in r.json()["readings"]]
     assert cycles == sorted(cycles)
 
 

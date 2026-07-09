@@ -38,7 +38,7 @@ class EngineDetail(BaseModel):
 class ReadingsResponse(BaseModel):
     engineId: str
     sensors: list[str]
-    series: list[dict]
+    readings: list[dict]
 
 
 class PartInfo(BaseModel):
@@ -122,7 +122,7 @@ async def engine_readings(engine_id: str, sensors: str | None = None) -> Reading
         stride = math.ceil(len(rows) / 500)
         rows = rows[::stride]
 
-    return ReadingsResponse(engineId=engine_id, sensors=sensor_list, series=rows)
+    return ReadingsResponse(engineId=engine_id, sensors=sensor_list, readings=rows)
 
 
 @router.get("/{engine_id}/impact", response_model=ImpactResponse)

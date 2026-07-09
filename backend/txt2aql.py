@@ -20,6 +20,11 @@ import os
 import re
 
 from langchain_arangodb import ArangoGraph, ArangoGraphQAChain
+from langchain_arangodb.chains.graph_qa.prompts import (
+    AQL_QA_TEMPLATE,
+    AQL_QA_PROMPT,
+)
+from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 
 from backend.db import get_db
@@ -35,6 +40,22 @@ _MUTATING_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Lazy-initialised chain cache
 # ---------------------------------------------------------------------------
+# The default QA template responds "in the same language as the User Input",
+# which causes the LLM to switch to Spanish when the AQL result contains
+# Spanish data (synthetic Faker names, location strings, etc.).
+# Override both instances to hard-code English.
+_QA_TEMPLATE_EN = AQL_QA_TEMPLATE.replace(
+    "in the same language as the `User Input`",
+    "in English",
+).replace(
+    "Your `Summary` should be in the same language as the `User Input`.",
+    "Your `Summary` should always be in English.",
+)
+_QA_PROMPT_EN = PromptTemplate(
+    input_variables=AQL_QA_PROMPT.input_variables,
+    template=_QA_TEMPLATE_EN,
+)
+
 _chain: ArangoGraphQAChain | None = None
 
 
@@ -58,6 +79,7 @@ def _get_chain() -> ArangoGraphQAChain | None:
         _chain = ArangoGraphQAChain.from_llm(
             llm=llm,
             graph=graph,
+            qa_prompt=_QA_PROMPT_EN,
             verbose=False,
             allow_dangerous_requests=True,
             force_read_only_query=True,   # raises ValueError on any write op
