@@ -1,0 +1,25 @@
+# secrets and local config
+.env.local
+.env.*.local
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+.ruff_cache/
+
+# data (download separately)
+data/
+!data/.gitkeep
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# misc
+.DS_Store
+*.log
