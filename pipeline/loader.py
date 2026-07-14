@@ -185,12 +185,14 @@ def _apply_collection_schemas(db) -> None:
                 ),
                 "type": "object",
                 "properties": {
-                    "tailNumber": {"type": "string",
-                                   "description": "Aircraft registration e.g. G-ABCD, N12345"},
-                    "model":      {"type": "string",
-                                   "description": "Aircraft type e.g. Boeing 737-800, Airbus A320"},
-                    "base":       {"type": "string",
-                                   "description": "Home airport IATA code: LHR=London Heathrow, JFK=New York JFK, SIN=Singapore Changi, DXB=Dubai, FRA=Frankfurt"},
+                    "tailNumber":    {"type": "string",
+                                      "description": "Aircraft registration e.g. G-ABCD, N12345"},
+                    "model":         {"type": "string",
+                                      "description": "Aircraft type e.g. Boeing 737-800, Airbus A320"},
+                    "base":          {"type": "string",
+                                      "description": "Home airport IATA code: LHR=London Heathrow, JFK=New York JFK, SIN=Singapore Changi, DXB=Dubai, FRA=Frankfurt"},
+                    "flightsPerDay": {"type": "integer",
+                                      "description": "Average revenue flights per day for this airframe (1-3)"},
                 },
             },
         },
@@ -269,16 +271,26 @@ def _apply_collection_schemas(db) -> None:
                 ),
                 "type": "object",
                 "properties": {
-                    "description": {"type": "string",
-                                    "description": "Work order task description"},
-                    "status":      {"type": "string",
-                                    "enum": ["open", "in_progress", "completed"],
-                                    "description": "Current work order status"},
-                    "priority":    {"type": "string",
-                                    "enum": ["high", "medium", "low"],
-                                    "description": "Maintenance priority level"},
-                    "engineId":    {"type": "integer",
-                                    "description": "Target engine identifier"},
+                    "description":        {"type": "string",
+                                           "description": "Work order task description"},
+                    "status":             {"type": "string",
+                                           "enum": ["closed", "open", "pending-parts"],
+                                           "description": "Work order status: closed=historical completed order, open=ready to action, pending-parts=waiting on procurement work order"},
+                    "generatedByPlanner": {"type": "boolean",
+                                           "description": "True for AI-generated planner work orders; field absent on all historical closed orders"},
+                    "type":               {"type": "string",
+                                           "enum": ["maintenance", "procurement"],
+                                           "description": "maintenance=hands-on engine work; procurement=ordering out-of-stock parts"},
+                    "engineId":           {"type": "string",
+                                           "description": "Target engine _key"},
+                    "technicianId":       {"type": "string",
+                                           "description": "Assigned technician _key"},
+                    "deadline":           {"type": "string",
+                                           "description": "ISO date by which the work order must be completed"},
+                    "riskBucket":         {"type": "string",
+                                           "description": "Risk tier inherited from the engine at plan time"},
+                    "createdAt":          {"type": "string",
+                                           "description": "ISO datetime when this work order was created by the planner"},
                 },
             },
         },
@@ -342,6 +354,188 @@ def _load_graph(db, data: dict[str, list[dict]]) -> None:
         print(f"  {key:20s}: {len(docs):>6} items")
 
 
+def _apply_ontology(db) -> None:
+    """Populate ontologyNodes and ontologyEdges for the chat planning agent.
+
+    These collections are NOT part of fleetGraph — they are metadata only.
+    Truncated and re-inserted on every load for idempotency.
+    """
+    for name in ["ontologyNodes", "ontologyEdges"]:
+        if not db.has_collection(name):
+            db.create_collection(name)
+        else:
+            db.collection(name).truncate()
+
+    nodes = [
+        {
+            "_key": "engine",
+            "label": "Engine",
+            "collection": "engines",
+            "allowedOps": ["create", "read", "update", "delete"],
+            "editableFields": ["model", "riskBucket", "predictedRUL"],
+            "cascadeOnDelete": [
+                "installedOn edge from this engine to its aircraft",
+                "all planner work orders targeting this engine and their edges",
+            ],
+            "constraints": [
+                "Adding an engine: call propose_create_entity then propose_create_relationship"
+                " to link it to an aircraft via installedOn",
+            ],
+        },
+        {
+            "_key": "aircraft",
+            "label": "Aircraft",
+            "collection": "aircraft",
+            "allowedOps": ["create", "read", "update", "delete"],
+            "editableFields": ["tailNumber", "base", "flightsPerDay"],
+            "cascadeOnDelete": [
+                "all engines installed on this aircraft (full engine cascade per engine)",
+                "installedOn edges to this aircraft",
+            ],
+            "constraints": [
+                "Changing base changes which technicians are eligible — existing planner WO"
+                " assignments may become invalid",
+            ],
+        },
+        {
+            "_key": "technician",
+            "label": "Technician",
+            "collection": "technicians",
+            "allowedOps": ["create", "read", "update", "delete"],
+            "editableFields": ["name", "homeBase"],
+            "cascadeOnDelete": [
+                "certifiedFor edges from this technician to subsystems",
+                "performedBy edges on planner work orders assigned to this technician"
+                " (WOs are kept but unassigned — not deleted)",
+            ],
+            "constraints": [
+                "Changing homeBase may invalidate existing WO assignments:"
+                " technicians can only work at their homeBase airport",
+            ],
+        },
+        {
+            "_key": "part",
+            "label": "Part",
+            "collection": "parts",
+            "allowedOps": ["create", "read", "update", "delete"],
+            "editableFields": ["name", "stockLevel", "leadTimeDays"],
+            "cascadeOnDelete": [
+                "requiredBy edges from this part to subsystems",
+                "consumed edges where this part is consumed by a work order",
+            ],
+            "constraints": [
+                "stockLevel must be >= 0",
+                "leadTimeDays must be >= 0",
+            ],
+        },
+        {
+            "_key": "workOrder",
+            "label": "Work Order",
+            "collection": "workOrders",
+            "allowedOps": ["create", "read", "update", "delete"],
+            "editableFields": ["status", "deadline", "description"],
+            "cascadeOnDelete": [
+                "maintains edge from this work order to its engine",
+                "performedBy edge from this work order to its technician",
+                "consumed edges from this work order to parts",
+            ],
+            "constraints": [
+                "Only generatedByPlanner==true documents may be updated or deleted via this agent",
+                "Historical work orders (status='closed') must not be modified",
+            ],
+        },
+        {
+            "_key": "subsystem",
+            "label": "Subsystem",
+            "collection": "subsystems",
+            "allowedOps": ["read", "update"],
+            "editableFields": ["name"],
+            "cascadeOnDelete": [],
+            "constraints": [
+                "Subsystems are structural components of engines — deletion not supported in this demo",
+            ],
+        },
+    ]
+
+    edges = [
+        {
+            "_key": "installedOn",
+            "label": "Engine installed on aircraft",
+            "edgeCollection": "installedOn",
+            "fromType": "engine",
+            "toType": "aircraft",
+            "allowedOps": ["create", "delete"],
+            "constraints": ["An engine should be installed on at most one aircraft at a time"],
+        },
+        {
+            "_key": "performedBy",
+            "label": "Work order assigned to technician",
+            "edgeCollection": "performedBy",
+            "fromType": "workOrder",
+            "toType": "technician",
+            "allowedOps": ["create", "delete"],
+            "constraints": ["Technician homeBase must match the engine's aircraft base"],
+        },
+        {
+            "_key": "certifiedFor",
+            "label": "Technician certified for subsystem type",
+            "edgeCollection": "certifiedFor",
+            "fromType": "technician",
+            "toType": "subsystem",
+            "allowedOps": ["create", "delete"],
+            "constraints": ["The subsystem must exist in the subsystems collection"],
+        },
+        {
+            "_key": "maintains",
+            "label": "Work order targets engine",
+            "edgeCollection": "maintains",
+            "fromType": "workOrder",
+            "toType": "engine",
+            "allowedOps": ["create", "delete"],
+            "constraints": [],
+        },
+        {
+            "_key": "consumed",
+            "label": "Work order consumes part",
+            "edgeCollection": "consumed",
+            "fromType": "workOrder",
+            "toType": "part",
+            "allowedOps": ["create", "delete"],
+            "constraints": [],
+        },
+        {
+            "_key": "partOf",
+            "label": "Subsystem is part of engine",
+            "edgeCollection": "partOf",
+            "fromType": "subsystem",
+            "toType": "engine",
+            "allowedOps": ["read"],
+            "constraints": ["Read-only — structural edge, not modifiable via agent"],
+        },
+        {
+            "_key": "requiredBy",
+            "label": "Part required by subsystem",
+            "edgeCollection": "requiredBy",
+            "fromType": "part",
+            "toType": "subsystem",
+            "allowedOps": ["read"],
+            "constraints": ["Read-only — structural edge, not modifiable via agent"],
+        },
+        {
+            "_key": "monitors",
+            "label": "Sensor monitors subsystem",
+            "edgeCollection": "monitors",
+            "fromType": "sensor",
+            "toType": "subsystem",
+            "allowedOps": ["read"],
+            "constraints": ["Read-only — structural edge, not modifiable via agent"],
+        },
+    ]
+
+    db.collection("ontologyNodes").import_bulk(nodes, on_duplicate="replace")
+    db.collection("ontologyEdges").import_bulk(edges, on_duplicate="replace")
+
+
 def main() -> None:
     _assert_safe_db()
     t0 = time.monotonic()
@@ -352,6 +546,9 @@ def main() -> None:
 
     print("Applying collection schemas …")
     _apply_collection_schemas(db)
+
+    print("Applying ontology …")
+    _apply_ontology(db)
 
     print("Ensuring C-MAPSS FD001 data …")
     fd001_path = ensure_fd001()

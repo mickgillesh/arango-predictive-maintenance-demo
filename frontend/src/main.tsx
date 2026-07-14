@@ -3,9 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import './index.css'
 import App from './App'
-import { FleetOverview }  from './screens/FleetOverview'
-import { EngineDetail }   from './screens/EngineDetail'
-import { ImpactExplorer } from './screens/ImpactExplorer'
+import { FleetOverview }     from './screens/FleetOverview'
+import { EngineDetail }      from './screens/EngineDetail'
+import { ImpactExplorer }    from './screens/ImpactExplorer'
+import { PlanningDashboard } from './screens/PlanningDashboard'
 
 const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ const router = createBrowserRouter([
       { index: true,                element: <FleetOverview /> },
       { path: 'engines/:id',        element: <EngineDetail /> },
       { path: 'engines/:id/impact', element: <ImpactExplorer /> },
+      { path: 'plan',               element: <PlanningDashboard /> },
     ],
   },
 ])

@@ -143,3 +143,133 @@ RETURN {
 # ---------------------------------------------------------------------------
 
 Q_HEALTH_CHECK = "RETURN { db: 'ok', version: VERSION() }"
+
+# ---------------------------------------------------------------------------
+# Maintenance planner — read queries
+# ---------------------------------------------------------------------------
+
+Q_PLAN_FLEET_CONTEXT = """
+FOR e IN engines
+  FILTER e.riskBucket IN ["critical", "warning"]
+  LET ac = FIRST(FOR a IN 1..1 OUTBOUND e installedOn RETURN a)
+  LET subs = (
+    FOR sub IN 1..1 INBOUND e partOf
+      FILTER sub.name IN e.driverSubsystems
+      RETURN sub
+  )
+  LET parts = (
+    FOR sub IN subs
+      FOR p IN 1..1 INBOUND sub requiredBy
+        RETURN DISTINCT {
+          id: p._key, name: p.name, subsystemType: p.subsystemType,
+          stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
+          blocking: p.stockLevel == 0
+        }
+  )
+  LET techs = (
+    FOR sub IN subs
+      FOR t IN 1..1 INBOUND sub certifiedFor
+        FILTER t.homeBase == ac.base
+        RETURN DISTINCT {
+          id: t._key, name: t.name, homeBase: t.homeBase,
+          certifications: t.certifications
+        }
+  )
+  SORT e.riskBucket ASC, e.predictedRUL ASC
+  RETURN {
+    id: e._key, riskBucket: e.riskBucket, predictedRUL: e.predictedRUL,
+    driverSubsystems: e.driverSubsystems,
+    aircraft: { tailNumber: ac.tailNumber, base: ac.base, flightsPerDay: ac.flightsPerDay },
+    parts: parts, technicians: techs
+  }
+"""
+
+Q_PLAN_WORK_ORDERS = """
+FOR wo IN workOrders
+  FILTER wo.generatedByPlanner == true
+  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains  RETURN e)
+  LET tech = FIRST(FOR t IN 1..1 OUTBOUND wo performedBy RETURN t)
+  LET parts = (
+    FOR p IN 1..1 OUTBOUND wo consumed
+      RETURN {
+        id: p._key, name: p.name, subsystemType: p.subsystemType,
+        stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
+        blocking: p.stockLevel == 0
+      }
+  )
+  SORT wo.deadline ASC
+  RETURN MERGE(wo, {
+    engine:     { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
+    technician: { id: tech._key, name: tech.name, homeBase: tech.homeBase },
+    parts: parts
+  })
+"""
+
+Q_PLAN_COLLECT_IDS = """
+FOR wo IN workOrders FILTER wo.generatedByPlanner == true RETURN wo._id
+"""
+
+# Mutating queries — only executed by the reset endpoint, never via the LangChain chain.
+Q_PLAN_DELETE_MAINTAINS = (
+    "FOR e IN maintains   FILTER e._from IN @ids REMOVE e IN maintains"
+)
+Q_PLAN_DELETE_PERFORMED = (
+    "FOR e IN performedBy FILTER e._from IN @ids REMOVE e IN performedBy"
+)
+Q_PLAN_DELETE_CONSUMED = (
+    "FOR e IN consumed    FILTER e._from IN @ids REMOVE e IN consumed"
+)
+Q_PLAN_DELETE_WOS = (
+    "FOR wo IN workOrders FILTER wo.generatedByPlanner == true REMOVE wo IN workOrders"
+)
+
+# ---------------------------------------------------------------------------
+# Chat agent — ontology + cascade AQL
+# ---------------------------------------------------------------------------
+
+Q_ONTOLOGY_FULL = """
+LET nodes = (FOR n IN ontologyNodes RETURN n)
+LET edges = (FOR e IN ontologyEdges RETURN e)
+RETURN { nodes: nodes, edges: edges }
+"""
+
+Q_CHAT_WO_BY_ENGINE = """
+FOR wo IN workOrders
+  FILTER wo.generatedByPlanner == true AND wo.engineId == @eid
+  LET tech = FIRST(FOR t IN 1..1 OUTBOUND wo performedBy RETURN t)
+  RETURN MERGE(wo, {technician: tech})
+"""
+
+# Cascade delete helpers — bind-parameterised, called from planning._cascade_delete
+
+Q_CASCADE_WO_KEYS_FOR_ENGINES = """
+FOR wo IN workOrders FILTER wo.engineId IN @engine_keys RETURN wo._key
+"""
+
+Q_CASCADE_ENGINES_FOR_AIRCRAFT = """
+FOR e IN 1..1 INBOUND @aircraft_id installedOn RETURN { key: e._key }
+"""
+
+# @@coll is bound by "@coll" in bind_vars — e.g. {"@coll": "maintains", "ids": [...]}
+Q_CASCADE_DELETE_EDGES_FROM_IDS = (
+    "FOR e IN @@coll FILTER e._from IN @ids REMOVE e IN @@coll"
+)
+Q_CASCADE_DELETE_EDGES_FROM_ID = (
+    "FOR e IN @@coll FILTER e._from == @id REMOVE e IN @@coll"
+)
+Q_CASCADE_DELETE_EDGES_TO_ID = (
+    "FOR e IN @@coll FILTER e._to == @id REMOVE e IN @@coll"
+)
+
+# For delete_relationship tool
+Q_CASCADE_DELETE_RELATIONSHIP = (
+    "FOR e IN @@coll FILTER e._from == @from AND e._to == @to REMOVE e IN @@coll"
+)
+
+Q_CASCADE_DELETE_PERFORMEDBY_TO_PLANNER = """
+FOR e IN performedBy
+  FILTER e._to == @id
+  LET wo = DOCUMENT(e._from)
+  FILTER wo.generatedByPlanner == true
+  REMOVE e IN performedBy
+"""

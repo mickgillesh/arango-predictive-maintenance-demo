@@ -88,3 +88,66 @@ export interface ChatMessage {
   aql?: string | null
   error?: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Maintenance planner
+// ---------------------------------------------------------------------------
+
+export type WOType   = 'maintenance' | 'procurement'
+export type WOStatus = 'open' | 'pending-parts' | 'closed'
+
+export interface PlannedWorkOrder {
+  _key: string
+  type: WOType
+  status: WOStatus
+  engineId: string
+  deadline: string
+  description: string
+  riskBucket: RiskBucket
+  technician: { id: string; name: string; homeBase: string }
+  parts: Part[]
+}
+
+export interface PlanSummary {
+  totalWorkOrders: number
+  maintenanceOrders: number
+  procurementOrders: number
+  enginesPlanned: number
+  reasoningSummary?: string
+}
+
+// ---------------------------------------------------------------------------
+// Planning chat assistant
+// ---------------------------------------------------------------------------
+
+export type ProposeOpType =
+  | 'create_entity'
+  | 'update_entity'
+  | 'delete_entity'
+  | 'create_relationship'
+  | 'delete_relationship'
+
+export interface ProposeEditOperation {
+  type: ProposeOpType
+  entity_type?: string
+  entity_key?: string
+  fields?: Record<string, unknown>
+  edge_type?: string
+  from_id?: string
+  to_id?: string
+}
+
+export interface ProposeEdit {
+  id: string
+  description: string
+  operation: ProposeEditOperation
+}
+
+export type PlannerChatRole = 'user' | 'assistant' | 'thinking' | 'tool_call'
+
+export interface PlannerChatMessage {
+  id: string
+  role: PlannerChatRole
+  text: string
+  tool?: string
+}

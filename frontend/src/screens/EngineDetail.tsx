@@ -49,8 +49,8 @@ export function EngineDetail() {
             <div className="detail-row"><span className="detail-label">Aircraft</span><span>{engine.aircraft.tailNumber}</span></div>
             <div className="detail-row"><span className="detail-label">Base</span><span>{engine.aircraft.base}</span></div>
             <div className="detail-row"><span className="detail-label">In service</span><span>{engine.entryIntoService}</span></div>
-            <div className="detail-row"><span className="detail-label">Health index</span><span>{(engine.healthIndex * 100).toFixed(1)}%</span></div>
-            <div className="detail-row"><span className="detail-label">Risk score</span><span>{engine.riskScore.toFixed(3)}</span></div>
+            <div className="detail-row"><span className="detail-label">Health index</span><span>{engine.healthIndex != null ? `${(engine.healthIndex * 100).toFixed(1)}%` : '—'}</span></div>
+            <div className="detail-row"><span className="detail-label">Risk score</span><span>{engine.riskScore != null ? engine.riskScore.toFixed(3) : '—'}</span></div>
           </div>
         </div>
       </div>

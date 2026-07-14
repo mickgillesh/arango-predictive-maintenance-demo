@@ -211,7 +211,8 @@ def _gen_aircraft(
         suffix = "".join(rng.choices(string.ascii_uppercase, k=4))
         tail = f"{BASE_PREFIXES[base]}-{suffix}"
         ac_key = f"AC{i + 1:03d}"
-        aircraft.append({"_key": ac_key, "tailNumber": tail, "base": base})
+        fpd = rng.randint(1, 3)
+        aircraft.append({"_key": ac_key, "tailNumber": tail, "base": base, "flightsPerDay": fpd})
         edges.append({"_from": f"engines/{e1}", "_to": f"aircraft/{ac_key}"})
         edges.append({"_from": f"engines/{e2}", "_to": f"aircraft/{ac_key}"})
     return aircraft, edges

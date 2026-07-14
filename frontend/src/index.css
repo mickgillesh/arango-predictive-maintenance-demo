@@ -141,3 +141,52 @@ tbody td { padding: 11px 14px; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Planning screen ── */
+.log-panel { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; font-family: 'SF Mono','Fira Code',monospace; font-size: 0.8rem; height: 220px; overflow-y: auto; color: var(--text2); }
+.log-line { line-height: 1.8; white-space: pre-wrap; }
+.log-line.maintenance { color: var(--healthy); }
+.log-line.procurement { color: var(--warning); }
+.log-line.error       { color: var(--critical); }
+.badge-maintenance   { background: rgba(63,185,80,.18);  color: var(--healthy);  border: 1px solid rgba(63,185,80,.35);  padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; }
+.badge-procurement   { background: rgba(210,153,34,.18); color: var(--warning);  border: 1px solid rgba(210,153,34,.35); padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; }
+.badge-pending-parts { background: rgba(248,81,73,.18);  color: var(--critical); border: 1px solid rgba(248,81,73,.35);  padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; }
+.badge-open          { background: rgba(63,185,80,.18);  color: var(--healthy);  border: 1px solid rgba(63,185,80,.35);  padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 14px; border-radius: var(--radius); cursor: pointer; font-size: 0.88rem; transition: border-color .15s, color .15s; }
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+.btn-danger  { background: rgba(248,81,73,.15); border: 1px solid rgba(248,81,73,.4); color: var(--critical); padding: 6px 14px; border-radius: var(--radius); cursor: pointer; font-size: 0.88rem; }
+.btn-danger:hover  { background: rgba(248,81,73,.25); }
+.plan-kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+@media (max-width: 700px) { .plan-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* Planning assistant chat panel */
+.plan-chat-msgs { height: 260px; overflow-y: auto; background: var(--bg);
+                  border: 1px solid var(--border); border-radius: var(--radius);
+                  padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;
+                  margin-bottom: 12px; }
+.plan-chat-empty { color: var(--text2); font-size: 0.88rem; padding: 8px 0; }
+.plan-msg { max-width: 82%; font-size: 0.88rem; word-break: break-word; }
+.plan-msg-user { align-self: flex-end; background: var(--accent2);
+                 color: #fff; border-radius: 12px 12px 2px 12px; padding: 8px 12px; }
+.plan-msg-assistant { align-self: flex-start; background: var(--surface2);
+                      border: 1px solid var(--border);
+                      border-radius: 2px 12px 12px 12px; padding: 8px 12px; }
+.plan-msg-thinking { align-self: flex-start; color: var(--text2);
+                     font-style: italic; font-size: 0.8rem; padding: 2px 0; }
+.plan-msg-tool_call { align-self: flex-start; font-family: 'SF Mono','Fira Code',monospace;
+                      font-size: 0.76rem; color: var(--text2);
+                      border: 1px solid var(--border); border-radius: 6px;
+                      padding: 4px 10px; background: var(--bg); }
+.pending-edits { background: var(--surface2); border: 1px solid var(--border);
+                 border-radius: var(--radius); padding: 12px 16px; margin-bottom: 12px; }
+.pending-edits-header { font-weight: 600; font-size: 0.85rem; color: var(--text2);
+                        margin-bottom: 8px; }
+.pending-edit-row { display: flex; justify-content: space-between; align-items: center;
+                    font-size: 0.85rem; padding: 6px 0;
+                    border-bottom: 1px solid var(--border); gap: 8px; }
+.pending-edit-row:last-of-type { border-bottom: none; }
+.pending-edit-row button { background: none; border: none; cursor: pointer;
+                           color: var(--text2); flex-shrink: 0; padding: 0 4px;
+                           font-size: 0.9rem; }
+.pending-edit-row button:hover { color: var(--critical); }
+.pending-edits-actions { display: flex; gap: 8px; margin-top: 10px; }

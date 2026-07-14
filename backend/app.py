@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv(".env.local", override=True)
 
-from backend.routes import chat, engines, fleet, health
+from backend.routes import chat, engines, fleet, health, planning
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ app.include_router(fleet.router, prefix="/api")
 app.include_router(engines.router, prefix="/api/engines")
 app.include_router(chat.router, prefix="/api")
 app.include_router(health.router, prefix="/api")
+app.include_router(planning.router, prefix="/api/plan")
 
 # Serve built frontend — only mount if dist exists
 _dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 import { RulHistogram } from '../components/RulHistogram'
 import type { FleetResponse, RiskBucket } from '../types'
@@ -33,6 +33,7 @@ export function FleetOverview() {
             {engines.length} engines · predictive maintenance dashboard
           </div>
         </div>
+        <Link to="/plan" className="btn-outline">Maintenance Planner →</Link>
       </div>
 
       {/* KPI cards */}
