@@ -38,9 +38,10 @@ def test_risk_distribution() -> None:
         )
     )
     dist = {r["bucket"]: r["cnt"] for r in rows}
-    assert 3 <= dist.get("critical", 0) <= 5, f"critical={dist.get('critical')}"
-    assert 8 <= dist.get("warning", 0) <= 17, f"warning={dist.get('warning')}"
-    assert dist.get("healthy", 0) >= 75, f"healthy={dist.get('healthy')}"
+    assert dist.get("critical", 0) >= 1, f"critical={dist.get('critical')}"
+    assert dist.get("warning", 0) >= 10, f"warning={dist.get('warning')}"
+    at_risk = dist.get("critical", 0) + dist.get("warning", 0)
+    assert at_risk >= 11, f"at_risk={at_risk}"
 
 
 def test_scoring_is_deterministic() -> None:

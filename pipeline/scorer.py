@@ -42,7 +42,7 @@ TOP_DRIVERS = 3         # number of driver sensors to report
 
 RISK_BUCKETS = [        # (health index threshold, bucket name)
     (0.75, "critical"),
-    (0.62, "warning"),  # raised from default 0.45 to tighten warning band
+    (0.45, "warning"),  # lowered to expand warning band → ~25 at-risk engines/base
     (0.00, "healthy"),
 ]
 

@@ -109,13 +109,22 @@ PARTS_CATALOGUE: list[tuple[str, str]] = [
     ("LPT exhaust plug", "LPT"),
 ]
 
-# Indices into PARTS_CATALOGUE that start with zero stock — spread across types
-# to guarantee at least one blocking part for any degrading subsystem combo.
+# Indices into PARTS_CATALOGUE that start with zero stock.
+# Two items per subsystem type so virtually every degrading engine will have
+# at least one blocking part — creating richer procurement + maintenance timelines.
 ZERO_STOCK_INDICES: frozenset[int] = frozenset({
-    7,   # "LPC blade set"
-    12,  # "HPC blade set stage 1-4"
-    22,  # "Fuel nozzle set (20x)"
-    26,  # "HPT blade set stage 1"
+    0,   # "Fan blade set"           (fan)
+    1,   # "Fan disk assembly"       (fan)
+    7,   # "LPC blade set"           (LPC)
+    8,   # "LPC vane set"            (LPC)
+    12,  # "HPC blade set stage 1-4" (HPC)
+    14,  # "HPC disk"                (HPC)
+    21,  # "Combustor liner"         (combustor)
+    22,  # "Fuel nozzle set (20x)"   (combustor)
+    26,  # "HPT blade set stage 1"   (HPT)
+    27,  # "HPT nozzle guide vane"   (HPT)
+    32,  # "LPT blade set stage 1-4" (LPT)
+    34,  # "LPT disk"                (LPT)
 })
 
 _WORK_ORDER_DESCRIPTIONS = [
@@ -290,9 +299,11 @@ def _gen_technicians(
 
     docs: list[dict] = []
     edges: list[dict] = []
-    for i in range(25):
+    for i in range(10):   # 2 technicians per base
         base = BASES[i % len(BASES)]
-        certs = rng.sample(SUBSYSTEM_TYPES, rng.randint(2, 3))
+        # Broad certifications (4-5 out of 6 subsystem types) so each tech can
+        # cover most at-risk engines at their base, keeping workloads dense.
+        certs = rng.sample(SUBSYSTEM_TYPES, rng.randint(4, 5))
         key = f"T{i + 1:03d}"
         docs.append({
             "_key": key,

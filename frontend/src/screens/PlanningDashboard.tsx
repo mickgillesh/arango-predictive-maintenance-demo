@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import type {
   PlannedWorkOrder, PlanSummary, RiskBucket, WOType, WOStatus,
-  ProposeEdit, PlannerChatMessage,
+  ProposeEdit, PlannerChatMessage, TechnicianTimeline, ScheduledTask,
 } from '../types'
 
 interface LogLine { text: string; cls: string }
@@ -29,11 +29,78 @@ function RiskDot({ bucket }: { bucket: RiskBucket }) {
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
 }
 
+function PlanGantt({ timelines }: { timelines: TechnicianTimeline[] }) {
+  if (!timelines.length) return null
+  const allTasks = timelines.flatMap(tl => tl.tasks)
+  const maxDay = Math.max(14, ...allTasks.map(t => t.dayEnd + 1))
+  // Pick tick interval so we get ~6-8 ticks
+  const tickStep = maxDay <= 14 ? 2 : maxDay <= 21 ? 3 : 7
+  const ticks = Array.from({ length: Math.floor(maxDay / tickStep) + 1 }, (_, i) => i * tickStep)
+
+  return (
+    <div className="section">
+      <div className="card">
+        <h2>Technician Timelines</h2>
+        <div className="gantt-wrap">
+          {/* Day header */}
+          <div className="gantt-row" style={{ paddingBottom: 4 }}>
+            <div className="gantt-label-col" />
+            <div className="gantt-track-col" style={{ position: 'relative', height: 18 }}>
+              {ticks.map(d => (
+                <span key={d} className="gantt-tick-label" style={{ left: `${(d / maxDay) * 100}%` }}>
+                  {d === 0 ? 'Today' : `Day ${d}`}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {timelines.map(tl => (
+            <div key={tl.technicianId} className="gantt-row">
+              <div className="gantt-label-col">
+                <div className="gantt-tech-name">{tl.technicianName}</div>
+              </div>
+              <div className="gantt-track-col">
+                <div className="gantt-track">
+                  {/* Subtle grid lines at tick positions */}
+                  {ticks.slice(1).map(d => (
+                    <div key={d} className="gantt-grid-line" style={{ left: `${(d / maxDay) * 100}%` }} />
+                  ))}
+                  {tl.tasks.map((task: ScheduledTask, i: number) => {
+                    const left = (task.dayStart / maxDay) * 100
+                    const width = Math.max(((task.dayEnd - task.dayStart + 1) / maxDay) * 100, 2.5)
+                    return (
+                      <div
+                        key={i}
+                        className={`gantt-bar gantt-bar-${task.taskType}`}
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                        title={`${task.description} — ${task.estimatedHours}h`}
+                      >
+                        E{task.engineId} · {task.estimatedHours}h
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Legend */}
+          <div className="gantt-legend">
+            <span className="gantt-legend-dot gantt-bar-maintenance" />Maintenance
+            <span className="gantt-legend-dot gantt-bar-procurement" style={{ marginLeft: 16 }} />Procurement
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function PlanningDashboard() {
   const [running, setRunning]       = useState(false)
   const [logLines, setLogLines]     = useState<LogLine[]>([])
   const [workOrders, setWorkOrders] = useState<PlannedWorkOrder[]>([])
   const [summary, setSummary]       = useState<PlanSummary | null>(null)
+  const [timelines, setTimelines]   = useState<TechnicianTimeline[]>([])
   const [resetting, setResetting]   = useState(false)
   const abortRef  = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
@@ -53,6 +120,38 @@ export function PlanningDashboard() {
       .then(r => setWorkOrders(r.workOrders))
       .catch(() => { /* no plan yet */ })
   }, [])
+
+  // Derive timeline from work orders whenever they change (covers both initial
+  // load and post-plan refresh, so the Gantt survives page navigation).
+  useEffect(() => {
+    const scheduled = workOrders.filter(wo => wo.scheduledStart != null)
+    if (!scheduled.length) { setTimelines([]); return }
+
+    // Anchor day 0 to the earliest scheduled start so the Gantt looks right
+    // regardless of when the plan was originally generated.
+    const minMs = Math.min(...scheduled.map(wo => new Date(wo.scheduledStart!).getTime()))
+    const anchor = new Date(minMs); anchor.setHours(0, 0, 0, 0)
+
+    const techMap = new Map<string, TechnicianTimeline>()
+    for (const wo of scheduled) {
+      if (!wo.technician) continue
+      const tid = wo.technician.id
+      if (!techMap.has(tid)) techMap.set(tid, { technicianId: tid, technicianName: wo.technician.name, tasks: [] })
+      const s = new Date(wo.scheduledStart!); s.setHours(0, 0, 0, 0)
+      const e = wo.scheduledEnd ? new Date(wo.scheduledEnd) : s; e.setHours(0, 0, 0, 0)
+      const dayStart = Math.max(0, Math.round((s.getTime() - anchor.getTime()) / 86_400_000))
+      const dayEnd   = Math.max(dayStart, Math.round((e.getTime() - anchor.getTime()) / 86_400_000))
+      techMap.get(tid)!.tasks.push({
+        engineId: wo.engineId,
+        taskType: wo.type,
+        dayStart,
+        dayEnd,
+        estimatedHours: wo.estimatedHours ?? 0,
+        description: wo.description,
+      })
+    }
+    setTimelines(Array.from(techMap.values()))
+  }, [workOrders])
 
   // Auto-scroll log
   useEffect(() => {
@@ -87,6 +186,8 @@ export function PlanningDashboard() {
             cls,
           )
           setWorkOrders(prev => [...prev, d as unknown as PlannedWorkOrder])
+        } else if (event === 'timeline') {
+          setTimelines((d.timelines as TechnicianTimeline[]) ?? [])
         } else if (event === 'summary') {
           setSummary(d as unknown as PlanSummary)
           addLog(`\n✔ Plan complete: ${d.totalWorkOrders} work orders across ${d.enginesPlanned} engines.`)
@@ -105,6 +206,11 @@ export function PlanningDashboard() {
       }
     } finally {
       setRunning(false)
+      // Refresh from DB to get fully-joined work orders (with technician, parts, riskBucket)
+      try {
+        const refreshed = await api.planWorkOrders()
+        if (refreshed.workOrders.length > 0) setWorkOrders(refreshed.workOrders)
+      } catch { /* non-fatal */ }
     }
   }
 
@@ -296,8 +402,10 @@ export function PlanningDashboard() {
                       <th>Type</th>
                       <th>Status</th>
                       <th>Risk</th>
+                      <th>Sched. Start</th>
+                      <th>Est. Hours</th>
                       <th>Deadline</th>
-                      <th style={{ maxWidth: 340 }}>Description</th>
+                      <th style={{ maxWidth: 300 }}>Description</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -311,6 +419,12 @@ export function PlanningDashboard() {
                         <td>
                           <RiskDot bucket={wo.riskBucket} />
                           {wo.riskBucket}
+                        </td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text2)' }}>
+                          {wo.scheduledStart ?? '—'}
+                        </td>
+                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {wo.estimatedHours != null ? `${wo.estimatedHours}h` : '—'}
                         </td>
                         <td style={{ color: deadlineColor(wo.deadline), fontVariantNumeric: 'tabular-nums' }}>
                           {wo.deadline}
@@ -327,6 +441,9 @@ export function PlanningDashboard() {
           ))}
         </div>
       )}
+
+      {/* Technician timeline Gantt */}
+      <PlanGantt timelines={timelines} />
 
       {/* Planning Assistant chat panel */}
       {workOrders.length > 0 && (

@@ -104,8 +104,26 @@ export interface PlannedWorkOrder {
   deadline: string
   description: string
   riskBucket: RiskBucket
+  estimatedHours?: number | null
+  scheduledStart?: string | null
+  scheduledEnd?: string | null
   technician: { id: string; name: string; homeBase: string }
   parts: Part[]
+}
+
+export interface ScheduledTask {
+  engineId: string
+  taskType: 'procurement' | 'maintenance'
+  dayStart: number
+  dayEnd: number
+  estimatedHours: number
+  description: string
+}
+
+export interface TechnicianTimeline {
+  technicianId: string
+  technicianName: string
+  tasks: ScheduledTask[]
 }
 
 export interface PlanSummary {

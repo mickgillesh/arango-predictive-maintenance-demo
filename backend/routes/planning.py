@@ -104,8 +104,23 @@ class PlannedEngineItem(BaseModel):
     blocking_part_ids: list[str]
 
 
+class ScheduledTask(BaseModel):
+    engine_id: str
+    task_type: str          # "procurement" | "maintenance"
+    day_start: int          # days from today (0 = today)
+    day_end: int            # last day inclusive; same-day task: day_start == day_end
+    estimated_hours: float
+    description: str
+
+
+class TechnicianTimeline(BaseModel):
+    technician_id: str
+    tasks: list[ScheduledTask]
+
+
 class MaintenancePlan(BaseModel):
     work_orders: list[PlannedEngineItem]
+    timelines: list[TechnicianTimeline] = []
     reasoning_summary: str
 
 
@@ -169,10 +184,38 @@ async def plan_run() -> StreamingResponse:
                 # Build prompt
                 prompt = (
                     "You are an aircraft maintenance scheduler. "
-                    "Given the fleet context below, assign each engine to exactly one technician "
-                    "from its available list and identify which parts are blocking (stockLevel == 0). "
-                    "Prioritize critical engines before warning. Within each tier prioritize lower predictedRUL. "
-                    "Return ONLY structured JSON — no explanations.\n\n"
+                    "Given the fleet context below, produce an optimised maintenance plan in three steps.\n\n"
+
+                    "STEP 1 — ASSIGN\n"
+                    f"There are {len(engines)} engines in the fleet context. "
+                    "EVERY engine must appear in work_orders — do not skip any. "
+                    "Assign each engine to exactly one technician. "
+                    "Prefer technicians where canServiceDegradingSubs=true; if none exist at the base use any technician listed. "
+                    "Schedule critical engines before warning, and within each tier prioritise lower predictedRUL. "
+                    "Identify which parts are blocking (stockLevel == 0).\n\n"
+
+                    "STEP 2 — ESTIMATE HOURS\n"
+                    "For each engine, estimate working hours for the maintenance task based on driverSubsystems:\n"
+                    "  - Monitoring/sensor subsystems: 2–4 h\n"
+                    "  - Hydraulic or fuel systems: 4–8 h\n"
+                    "  - Core engine or compressor work: 8–16 h\n"
+                    "  - Multiple subsystems: sum estimates, cap at 20 h per task\n"
+                    "Procurement admin (ordering missing parts) always takes 2 h of work.\n\n"
+
+                    "STEP 3 — BUILD TIMELINE\n"
+                    "For each technician, build a day-by-day schedule (day 0 = today, 8 working hours per day).\n"
+                    "Rules:\n"
+                    "  a) Procurement tasks always start on day 0 — order parts immediately.\n"
+                    "  b) Maintenance with all parts in stock can start on day 0.\n"
+                    "  c) Maintenance blocked on missing parts starts no earlier than the maximum lead time "
+                    "(in days) of those parts.\n"
+                    "  d) A technician works on one task at a time — tasks must not overlap.\n"
+                    "  e) Fill waiting time: schedule available-parts maintenance during procurement wait.\n"
+                    "  f) day_start and day_end are calendar days (integers). "
+                    "A 6 h task starting day 4 → day_start=4, day_end=4. "
+                    "A 10 h task starting day 4 → day_start=4, day_end=5.\n\n"
+
+                    "Return ONLY structured JSON — no prose outside the JSON.\n\n"
                     f"Fleet context (JSON):\n{json.dumps(engines, indent=2)}"
                 )
 
@@ -180,11 +223,24 @@ async def plan_run() -> StreamingResponse:
                     model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
                     temperature=0,
                     api_key=os.environ["OPENAI_API_KEY"],
+                    max_tokens=16384,
                 )
                 structured = llm.with_structured_output(MaintenancePlan)
                 plan: MaintenancePlan = await structured.ainvoke(prompt)  # type: ignore[assignment]
 
                 yield _sse("progress", {"message": "Validating plan and writing work orders…", "step": 3, "total": 5})
+
+                # (engine_id, "procurement"|"maintenance") → ScheduledTask from LLM timeline
+                schedule_lookup: dict[tuple[str, str], ScheduledTask] = {
+                    (task.engine_id, task.task_type.lower()): task
+                    for tl in plan.timelines
+                    for task in tl.tasks
+                }
+                tech_name_map: dict[str, str] = {
+                    t["id"]: t["name"]
+                    for e in engines
+                    for t in e["technicians"]
+                }
 
                 # Build lookup sets for validation
                 eng_map = {e["id"]: e for e in engines}
@@ -193,6 +249,7 @@ async def plan_run() -> StreamingResponse:
 
                 total_wo = maint_count = proc_count = 0
                 planned_engines: set[str] = set()
+                today = date.today()
                 now_iso = datetime.now(timezone.utc).isoformat()
 
                 for item in plan.work_orders:
@@ -253,6 +310,7 @@ async def plan_run() -> StreamingResponse:
                     # Procurement work order (if blocking parts)
                     if has_blocking:
                         wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
+                        proc_sched = schedule_lookup.get((item.engine_id, "procurement"))
                         wo_doc = {
                             "_key": wo_key,
                             "generatedByPlanner": True,
@@ -263,6 +321,9 @@ async def plan_run() -> StreamingResponse:
                             "riskBucket": engine["riskBucket"],
                             "status": "open",
                             "createdAt": now_iso,
+                            "estimatedHours": proc_sched.estimated_hours if proc_sched else 2.0,
+                            "scheduledStart": (today + timedelta(days=proc_sched.day_start)).isoformat() if proc_sched else today.isoformat(),
+                            "scheduledEnd": (today + timedelta(days=proc_sched.day_end)).isoformat() if proc_sched else today.isoformat(),
                             "description": (
                                 f"Procure blocking parts for engine #{item.engine_id} "
                                 f"({', '.join(engine.get('driverSubsystems', []))})"
@@ -276,6 +337,9 @@ async def plan_run() -> StreamingResponse:
                             "engineId": item.engine_id, "technicianName": tech_name,
                             "deadline": proc_dl, "status": "open",
                             "description": wo_doc["description"],
+                            "estimatedHours": wo_doc["estimatedHours"],
+                            "scheduledStart": wo_doc["scheduledStart"],
+                            "scheduledEnd": wo_doc["scheduledEnd"],
                         })
                         total_wo += 1
                         proc_count += 1
@@ -283,6 +347,7 @@ async def plan_run() -> StreamingResponse:
                     # Maintenance work order
                     wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
                     maint_status = "pending-parts" if has_blocking else "open"
+                    maint_sched = schedule_lookup.get((item.engine_id, "maintenance"))
                     wo_doc = {
                         "_key": wo_key,
                         "generatedByPlanner": True,
@@ -293,6 +358,9 @@ async def plan_run() -> StreamingResponse:
                         "riskBucket": engine["riskBucket"],
                         "status": maint_status,
                         "createdAt": now_iso,
+                        "estimatedHours": maint_sched.estimated_hours if maint_sched else None,
+                        "scheduledStart": (today + timedelta(days=maint_sched.day_start)).isoformat() if maint_sched else None,
+                        "scheduledEnd": (today + timedelta(days=maint_sched.day_end)).isoformat() if maint_sched else None,
                         "description": (
                             f"Scheduled maintenance: {', '.join(engine.get('driverSubsystems', []))} "
                             f"(engine #{item.engine_id})"
@@ -306,10 +374,95 @@ async def plan_run() -> StreamingResponse:
                         "engineId": item.engine_id, "technicianName": tech_name,
                         "deadline": maint_dl, "status": maint_status,
                         "description": wo_doc["description"],
+                        "estimatedHours": wo_doc["estimatedHours"],
+                        "scheduledStart": wo_doc["scheduledStart"],
+                        "scheduledEnd": wo_doc["scheduledEnd"],
                     })
                     total_wo += 1
                     maint_count += 1
                     planned_engines.add(item.engine_id)
+
+                # Fallback: create bare work orders for any engines the LLM omitted
+                for eid, engine in eng_map.items():
+                    if eid in planned_engines or not engine["technicians"]:
+                        continue
+                    tech = engine["technicians"][0]
+                    tech_id = tech["id"]
+                    tech_name = tech["name"]
+                    has_blocking = any(p["blocking"] for p in engine["parts"])
+                    blocking_ids = [p["id"] for p in engine["parts"] if p["blocking"]]
+                    max_lead = max(
+                        (p["leadTimeDays"] for p in engine["parts"] if p["id"] in blocking_ids),
+                        default=0,
+                    )
+                    proc_dl, maint_dl = _deadline(engine, has_blocking, max_lead)
+
+                    yield _sse("progress", {
+                        "message": (
+                            f"Engine #{eid} ({engine['riskBucket']}, RUL={engine['predictedRUL']}, "
+                            f"{engine['aircraft']['tailNumber']}) → {tech_name} [auto-assigned]"
+                        ),
+                        "step": 3, "total": 5,
+                    })
+
+                    if has_blocking:
+                        wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
+                        wo_doc = {
+                            "_key": wo_key, "generatedByPlanner": True,
+                            "type": "procurement", "engineId": eid, "technicianId": tech_id,
+                            "deadline": proc_dl, "riskBucket": engine["riskBucket"],
+                            "status": "open", "createdAt": now_iso,
+                            "estimatedHours": 2.0,
+                            "scheduledStart": today.isoformat(),
+                            "scheduledEnd": today.isoformat(),
+                            "description": (
+                                f"Procure blocking parts for engine #{eid} "
+                                f"({', '.join(engine.get('driverSubsystems', []))})"
+                            ),
+                        }
+                        await asyncio.to_thread(
+                            partial(_write_wo, wo_doc, eid, tech_id, blocking_ids)
+                        )
+                        yield _sse("work_order", {
+                            "woKey": wo_key, "type": "procurement",
+                            "engineId": eid, "technicianName": tech_name,
+                            "deadline": proc_dl, "status": "open",
+                            "description": wo_doc["description"],
+                            "estimatedHours": 2.0,
+                            "scheduledStart": wo_doc["scheduledStart"],
+                            "scheduledEnd": wo_doc["scheduledEnd"],
+                        })
+                        total_wo += 1
+                        proc_count += 1
+
+                    wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
+                    maint_status = "pending-parts" if has_blocking else "open"
+                    wo_doc = {
+                        "_key": wo_key, "generatedByPlanner": True,
+                        "type": "maintenance", "engineId": eid, "technicianId": tech_id,
+                        "deadline": maint_dl, "riskBucket": engine["riskBucket"],
+                        "status": maint_status, "createdAt": now_iso,
+                        "estimatedHours": None,
+                        "scheduledStart": None, "scheduledEnd": None,
+                        "description": (
+                            f"Scheduled maintenance: {', '.join(engine.get('driverSubsystems', []))} "
+                            f"(engine #{eid})"
+                        ),
+                    }
+                    await asyncio.to_thread(
+                        partial(_write_wo, wo_doc, eid, tech_id, [])
+                    )
+                    yield _sse("work_order", {
+                        "woKey": wo_key, "type": "maintenance",
+                        "engineId": eid, "technicianName": tech_name,
+                        "deadline": maint_dl, "status": maint_status,
+                        "description": wo_doc["description"],
+                        "estimatedHours": None,
+                        "scheduledStart": None, "scheduledEnd": None,
+                    })
+                    total_wo += 1
+                    maint_count += 1
+                    planned_engines.add(eid)
 
                 yield _sse("summary", {
                     "totalWorkOrders": total_wo,
@@ -318,6 +471,28 @@ async def plan_run() -> StreamingResponse:
                     "enginesPlanned": len(planned_engines),
                     "reasoningSummary": plan.reasoning_summary,
                 })
+
+                if plan.timelines:
+                    timeline_payload = [
+                        {
+                            "technicianId": tl.technician_id,
+                            "technicianName": tech_name_map.get(tl.technician_id, tl.technician_id),
+                            "tasks": [
+                                {
+                                    "engineId": t.engine_id,
+                                    "taskType": t.task_type.lower(),
+                                    "dayStart": t.day_start,
+                                    "dayEnd": t.day_end,
+                                    "estimatedHours": t.estimated_hours,
+                                    "description": t.description,
+                                }
+                                for t in tl.tasks
+                            ],
+                        }
+                        for tl in plan.timelines
+                    ]
+                    yield _sse("timeline", {"timelines": timeline_payload})
+
                 yield _sse("done", {})
 
             except Exception as exc:

@@ -166,16 +166,23 @@ FOR e IN engines
           blocking: p.stockLevel == 0
         }
   )
-  LET techs = (
+  LET certified_keys = (
     FOR sub IN subs
       FOR t IN 1..1 INBOUND sub certifiedFor
         FILTER t.homeBase == ac.base
-        RETURN DISTINCT {
-          id: t._key, name: t.name, homeBase: t.homeBase,
-          certifications: t.certifications
-        }
+        RETURN DISTINCT t._key
+  )
+  LET techs = (
+    FOR t IN technicians
+      FILTER t.homeBase == ac.base
+      RETURN {
+        id: t._key, name: t.name, homeBase: t.homeBase,
+        certifications: t.certifications,
+        canServiceDegradingSubs: t._key IN certified_keys
+      }
   )
   SORT e.riskBucket ASC, e.predictedRUL ASC
+  LIMIT 30
   RETURN {
     id: e._key, riskBucket: e.riskBucket, predictedRUL: e.predictedRUL,
     driverSubsystems: e.driverSubsystems,

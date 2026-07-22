@@ -1,5 +1,4 @@
 import { Outlet } from 'react-router-dom'
-import { ChatPanel } from './components/ChatPanel'
 
 export default function App() {
   return (
@@ -7,7 +6,6 @@ export default function App() {
       <main className="main-area">
         <Outlet />
       </main>
-      <ChatPanel />
     </div>
   )
 }
