@@ -105,6 +105,7 @@ export interface PlannedWorkOrder {
   description: string
   riskBucket: RiskBucket
   estimatedHours?: number | null
+  scheduledHourStart?: number | null
   scheduledStart?: string | null
   scheduledEnd?: string | null
   technician: { id: string; name: string; homeBase: string }
@@ -112,8 +113,11 @@ export interface PlannedWorkOrder {
 }
 
 export interface ScheduledTask {
+  woKey: string
   engineId: string
   taskType: 'procurement' | 'maintenance'
+  hourStart: number
+  hourEnd: number
   dayStart: number
   dayEnd: number
   estimatedHours: number

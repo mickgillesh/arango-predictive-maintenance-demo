@@ -8,6 +8,36 @@ import type {
 
 interface LogLine { text: string; cls: string }
 
+// Convert a working-hour offset to a real wall-clock Date, skipping weekends.
+// Hour 0 = today 08:00; each 8-hour block is one Mon-Fri working day.
+function hourOffsetToDate(h: number): Date {
+  const base = new Date()
+  base.setHours(0, 0, 0, 0)
+  let d = new Date(base)
+  let workingDaysLeft = Math.floor(h / 8)
+  while (workingDaysLeft > 0) {
+    d.setDate(d.getDate() + 1)
+    if (d.getDay() !== 0 && d.getDay() !== 6) workingDaysLeft--
+  }
+  d.setHours(8 + (h % 8), 0, 0, 0)
+  return d
+}
+
+function fmtDateTime(h: number | null | undefined): string {
+  if (h == null) return '—'
+  return hourOffsetToDate(h).toLocaleString('en-GB', {
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+}
+
+function fmtDayTick(dayOffset: number): string {
+  // dayOffset is a working-day count, reuse hourOffsetToDate at day boundary
+  const d = hourOffsetToDate(dayOffset * 8)
+  d.setHours(0, 0, 0, 0)
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
 function deadlineColor(dl: string): string {
   const days = (new Date(dl).getTime() - Date.now()) / 86_400_000
   if (days <= 7)  return 'var(--critical)'
@@ -29,13 +59,91 @@ function RiskDot({ bucket }: { bucket: RiskBucket }) {
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
 }
 
-function PlanGantt({ timelines }: { timelines: TechnicianTimeline[] }) {
+function WorkOrderDrawer({ wo, onClose }: { wo: PlannedWorkOrder; onClose: () => void }) {
+  const techName = wo.technician?.name ?? '—'
+  const techBase = wo.technician?.homeBase ?? '—'
+  const endHour  = wo.scheduledHourStart != null && wo.estimatedHours != null
+    ? wo.scheduledHourStart + wo.estimatedHours : null
+
+  return (
+    <>
+      <div className="wo-drawer-backdrop" onClick={onClose} />
+      <div className="wo-drawer">
+        <div className="wo-drawer-header">
+          <div>
+            <div className="wo-drawer-key">{wo._key}</div>
+            <div className="wo-drawer-title">Engine #{wo.engineId} — {wo.description}</div>
+          </div>
+          <button className="wo-drawer-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="wo-drawer-grid">
+          <span className="wo-drawer-label">Type</span>
+          <span><TypeBadge type={wo.type} /></span>
+          <span className="wo-drawer-label">Status</span>
+          <span><StatusBadge status={wo.status} /></span>
+          <span className="wo-drawer-label">Risk</span>
+          <span><RiskDot bucket={wo.riskBucket} />{wo.riskBucket}</span>
+          <span className="wo-drawer-label">Technician</span>
+          <span>{techName} <span className="tag" style={{ marginLeft: 4 }}>{techBase}</span></span>
+          <span className="wo-drawer-label">Start</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {fmtDateTime(wo.scheduledHourStart)}
+          </span>
+          <span className="wo-drawer-label">End</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {fmtDateTime(endHour)}{wo.estimatedHours != null ? ` · ${wo.estimatedHours}h` : ''}
+          </span>
+          <span className="wo-drawer-label">Deadline</span>
+          <span style={{ color: deadlineColor(wo.deadline), fontVariantNumeric: 'tabular-nums' }}>
+            {wo.deadline}
+          </span>
+        </div>
+
+        {wo.parts?.length > 0 && (
+          <>
+            <div className="wo-drawer-section-title">Parts</div>
+            {wo.parts.map(p => (
+              <div key={p.id} className="wo-drawer-part-row">
+                <span className={p.blocking ? 'wo-part-blocking' : 'wo-part-ok'}>
+                  {p.blocking ? '⚠' : '✓'}
+                </span>
+                <div className="wo-drawer-part-info">
+                  <div className="wo-drawer-part-name">{p.name}</div>
+                  <div className="wo-drawer-part-meta">
+                    {p.blocking
+                      ? `Out of stock — ${p.leadTimeDays}d lead time`
+                      : `In stock (${p.stockLevel})`}
+                    <span className="tag" style={{ marginLeft: 8 }}>{p.subsystemType}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  )
+}
+
+function PlanGantt({
+  timelines,
+  workOrdersByKey,
+  onSelect,
+}: {
+  timelines: TechnicianTimeline[]
+  workOrdersByKey: Map<string, PlannedWorkOrder>
+  onSelect: (wo: PlannedWorkOrder) => void
+}) {
   if (!timelines.length) return null
   const allTasks = timelines.flatMap(tl => tl.tasks)
-  const maxDay = Math.max(14, ...allTasks.map(t => t.dayEnd + 1))
-  // Pick tick interval so we get ~6-8 ticks
-  const tickStep = maxDay <= 14 ? 2 : maxDay <= 21 ? 3 : 7
-  const ticks = Array.from({ length: Math.floor(maxDay / tickStep) + 1 }, (_, i) => i * tickStep)
+  // Axis in working-hours so sub-day tasks don't overlap visually.
+  // Round up to the next full 8-hour day boundary.
+  const maxHours = Math.ceil(Math.max(40, ...allTasks.map(t => t.hourEnd ?? (t.dayEnd + 1) * 8)) / 8) * 8
+  // One tick per day (every 8 working-hours); aim for ≤10 ticks
+  const dayCount = maxHours / 8
+  const tickEvery = dayCount <= 10 ? 1 : dayCount <= 20 ? 2 : 5
+  const ticks = Array.from({ length: Math.floor(dayCount / tickEvery) + 1 }, (_, i) => i * tickEvery)
 
   return (
     <div className="section">
@@ -47,8 +155,8 @@ function PlanGantt({ timelines }: { timelines: TechnicianTimeline[] }) {
             <div className="gantt-label-col" />
             <div className="gantt-track-col" style={{ position: 'relative', height: 18 }}>
               {ticks.map(d => (
-                <span key={d} className="gantt-tick-label" style={{ left: `${(d / maxDay) * 100}%` }}>
-                  {d === 0 ? 'Today' : `Day ${d}`}
+                <span key={d} className="gantt-tick-label" style={{ left: `${((d * 8) / maxHours) * 100}%` }}>
+                  {fmtDayTick(d)}
                 </span>
               ))}
             </div>
@@ -61,19 +169,22 @@ function PlanGantt({ timelines }: { timelines: TechnicianTimeline[] }) {
               </div>
               <div className="gantt-track-col">
                 <div className="gantt-track">
-                  {/* Subtle grid lines at tick positions */}
                   {ticks.slice(1).map(d => (
-                    <div key={d} className="gantt-grid-line" style={{ left: `${(d / maxDay) * 100}%` }} />
+                    <div key={d} className="gantt-grid-line" style={{ left: `${((d * 8) / maxHours) * 100}%` }} />
                   ))}
                   {tl.tasks.map((task: ScheduledTask, i: number) => {
-                    const left = (task.dayStart / maxDay) * 100
-                    const width = Math.max(((task.dayEnd - task.dayStart + 1) / maxDay) * 100, 2.5)
+                    const hs   = task.hourStart ?? task.dayStart * 8
+                    const he   = task.hourEnd   ?? hs + (task.estimatedHours || 8)
+                    const left = (hs / maxHours) * 100
+                    const pct  = ((he - hs) / maxHours) * 100
+                    const wo   = workOrdersByKey.get(task.woKey)
                     return (
                       <div
                         key={i}
-                        className={`gantt-bar gantt-bar-${task.taskType}`}
-                        style={{ left: `${left}%`, width: `${width}%` }}
+                        className={`gantt-bar gantt-bar-${task.taskType}${wo ? ' gantt-bar-clickable' : ''}`}
+                        style={{ left: `${left}%`, width: `max(calc(${pct}% - 2px), 4px)` }}
                         title={`${task.description} — ${task.estimatedHours}h`}
+                        onClick={wo ? () => onSelect(wo) : undefined}
                       >
                         E{task.engineId} · {task.estimatedHours}h
                       </div>
@@ -102,6 +213,7 @@ export function PlanningDashboard() {
   const [summary, setSummary]       = useState<PlanSummary | null>(null)
   const [timelines, setTimelines]   = useState<TechnicianTimeline[]>([])
   const [resetting, setResetting]   = useState(false)
+  const [selectedWO, setSelectedWO] = useState<PlannedWorkOrder | null>(null)
   const abortRef  = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -124,28 +236,24 @@ export function PlanningDashboard() {
   // Derive timeline from work orders whenever they change (covers both initial
   // load and post-plan refresh, so the Gantt survives page navigation).
   useEffect(() => {
-    const scheduled = workOrders.filter(wo => wo.scheduledStart != null)
+    const scheduled = workOrders.filter(wo => wo.scheduledHourStart != null)
     if (!scheduled.length) { setTimelines([]); return }
-
-    // Anchor day 0 to the earliest scheduled start so the Gantt looks right
-    // regardless of when the plan was originally generated.
-    const minMs = Math.min(...scheduled.map(wo => new Date(wo.scheduledStart!).getTime()))
-    const anchor = new Date(minMs); anchor.setHours(0, 0, 0, 0)
 
     const techMap = new Map<string, TechnicianTimeline>()
     for (const wo of scheduled) {
       if (!wo.technician) continue
       const tid = wo.technician.id
       if (!techMap.has(tid)) techMap.set(tid, { technicianId: tid, technicianName: wo.technician.name, tasks: [] })
-      const s = new Date(wo.scheduledStart!); s.setHours(0, 0, 0, 0)
-      const e = wo.scheduledEnd ? new Date(wo.scheduledEnd) : s; e.setHours(0, 0, 0, 0)
-      const dayStart = Math.max(0, Math.round((s.getTime() - anchor.getTime()) / 86_400_000))
-      const dayEnd   = Math.max(dayStart, Math.round((e.getTime() - anchor.getTime()) / 86_400_000))
+      const hourStart = wo.scheduledHourStart!
+      const hourEnd   = hourStart + (wo.estimatedHours ?? 8)
       techMap.get(tid)!.tasks.push({
+        woKey: wo._key,
         engineId: wo.engineId,
         taskType: wo.type,
-        dayStart,
-        dayEnd,
+        hourStart,
+        hourEnd,
+        dayStart: Math.floor(hourStart / 8),
+        dayEnd:   Math.floor((hourEnd - 0.001) / 8),
         estimatedHours: wo.estimatedHours ?? 0,
         description: wo.description,
       })
@@ -299,6 +407,9 @@ export function PlanningDashboard() {
     }
   }
 
+  // Index for Gantt bar → WO lookup
+  const workOrdersByKey = new Map(workOrders.map(wo => [wo._key, wo]))
+
   // Group work orders by technician
   const byTech: Record<string, { name: string; homeBase: string; wos: PlannedWorkOrder[] }> = {}
   for (const wo of workOrders) {
@@ -309,6 +420,7 @@ export function PlanningDashboard() {
 
   return (
     <>
+      {selectedWO && <WorkOrderDrawer wo={selectedWO} onClose={() => setSelectedWO(null)} />}
       <nav className="breadcrumb">
         <Link to="/">Fleet</Link>
         <span className="sep">›</span>
@@ -410,9 +522,9 @@ export function PlanningDashboard() {
                   </thead>
                   <tbody>
                     {group.wos.map(wo => (
-                      <tr key={wo._key}>
+                      <tr key={wo._key} className="wo-row-clickable" onClick={() => setSelectedWO(wo)}>
                         <td>
-                          <Link to={`/engines/${wo.engineId}`}>#{wo.engineId}</Link>
+                          <Link to={`/engines/${wo.engineId}`} onClick={e => e.stopPropagation()}>#{wo.engineId}</Link>
                         </td>
                         <td><TypeBadge type={wo.type} /></td>
                         <td><StatusBadge status={wo.status} /></td>
@@ -443,7 +555,11 @@ export function PlanningDashboard() {
       )}
 
       {/* Technician timeline Gantt */}
-      <PlanGantt timelines={timelines} />
+      <PlanGantt
+        timelines={timelines}
+        workOrdersByKey={workOrdersByKey}
+        onSelect={setSelectedWO}
+      />
 
       {/* Planning Assistant chat panel */}
       {workOrders.length > 0 && (

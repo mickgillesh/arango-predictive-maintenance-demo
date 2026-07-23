@@ -266,11 +266,12 @@ def _gen_parts(
         sub_by_type.setdefault(s["name"], []).append(s["_key"])
 
     docs: list[dict] = []
-    edges: list[dict] = []
+    parts_by_type: dict[str, list[str]] = {}
     for idx, (name, sub_type) in enumerate(PARTS_CATALOGUE):
         key = f"P{idx + 1:03d}"
         stock = 0 if idx in ZERO_STOCK_INDICES else rng.randint(1, 20)
-        lead = rng.randint(2, 30)
+        # Heavy parts (blade sets, disks) take 5-10 days; consumables 1-4 days.
+        lead = rng.randint(5, 10) if idx in ZERO_STOCK_INDICES else rng.randint(1, 4)
         docs.append({
             "_key": key,
             "name": name,
@@ -278,8 +279,23 @@ def _gen_parts(
             "stockLevel": stock,
             "leadTimeDays": lead,
         })
-        for sub_key in sub_by_type.get(sub_type, []):
-            edges.append({"_from": f"parts/{key}", "_to": f"subsystems/{sub_key}"})
+        parts_by_type.setdefault(sub_type, []).append(key)
+
+    # Each subsystem INSTANCE is linked to a random 2-4 catalogue parts for its
+    # type rather than all of them.  With 2 zero-stock items per type this gives
+    # roughly a 40-60 % chance that an instance's required parts are all in stock,
+    # creating a natural mix of direct-maintenance and procurement-first engines.
+    edges: list[dict] = []
+    for sub_type, sub_keys in sub_by_type.items():
+        catalogue = parts_by_type.get(sub_type, [])
+        if not catalogue:
+            continue
+        k_max = min(4, len(catalogue))
+        for sub_key in sub_keys:
+            k = rng.randint(2, k_max)
+            for part_key in rng.sample(catalogue, k=k):
+                edges.append({"_from": f"parts/{part_key}", "_to": f"subsystems/{sub_key}"})
+
     return docs, edges
 
 

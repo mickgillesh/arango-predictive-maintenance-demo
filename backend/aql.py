@@ -194,8 +194,13 @@ FOR e IN engines
 Q_PLAN_WORK_ORDERS = """
 FOR wo IN workOrders
   FILTER wo.generatedByPlanner == true
-  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains  RETURN e)
-  LET tech = FIRST(FOR t IN 1..1 OUTBOUND wo performedBy RETURN t)
+  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
+  LET tech = FIRST(
+    FOR t, e IN 1..1 OUTBOUND wo performedBy
+      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
+      SORT e.validFrom DESC
+      RETURN t
+  )
   LET parts = (
     FOR p IN 1..1 OUTBOUND wo consumed
       RETURN {
@@ -209,6 +214,25 @@ FOR wo IN workOrders
     engine:     { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
     technician: { id: tech._key, name: tech.name, homeBase: tech.homeBase },
     parts: parts
+  })
+"""
+
+# Same query at an arbitrary point in time (bind param @t = Unix seconds).
+Q_PLAN_WORK_ORDERS_AT_TIME = """
+FOR wo IN workOrders
+  FILTER wo.generatedByPlanner == true
+  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
+  LET tech = FIRST(
+    FOR t, e IN 1..1 OUTBOUND wo performedBy
+      FILTER e.validFrom <= @t AND (e.validTo == null OR e.validTo > @t)
+      SORT e.validFrom DESC
+      RETURN t
+  )
+  FILTER tech != null
+  SORT wo.deadline ASC
+  RETURN MERGE(wo, {
+    engine:     { id: eng._key, riskBucket: eng.riskBucket, predictedRUL: eng.predictedRUL },
+    technician: { id: tech._key, name: tech.name, homeBase: tech.homeBase }
   })
 """
 
@@ -243,8 +267,82 @@ RETURN { nodes: nodes, edges: edges }
 Q_CHAT_WO_BY_ENGINE = """
 FOR wo IN workOrders
   FILTER wo.generatedByPlanner == true AND wo.engineId == @eid
-  LET tech = FIRST(FOR t IN 1..1 OUTBOUND wo performedBy RETURN t)
+  LET tech = FIRST(
+    FOR t, e IN 1..1 OUTBOUND wo performedBy
+      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
+      SORT e.validFrom DESC
+      RETURN t
+  )
   RETURN MERGE(wo, {technician: tech})
+"""
+
+# Technician's currently-valid work orders (for availability checks).
+# Bind params: @tech_key (string), @now (Unix seconds int).
+Q_TECH_CURRENT_SCHEDULE = """
+FOR wo IN workOrders
+  FILTER wo.generatedByPlanner == true
+  FOR t, e IN 1..1 OUTBOUND wo performedBy
+    FILTER t._key == @tech_key
+    FILTER e.validTo == null OR e.validTo > @now
+    RETURN {
+      woKey: wo._key, engineId: wo.engineId, type: wo.type,
+      scheduledHourStart: wo.scheduledHourStart,
+      estimatedHours: wo.estimatedHours, status: wo.status
+    }
+"""
+
+# Full context for a single work order — needed before proposing a reassignment.
+# Bind params: @wo_key (string), @now (Unix seconds int).
+Q_WO_REASSIGN_CONTEXT = """
+LET wo = DOCUMENT(CONCAT('workOrders/', @wo_key))
+FILTER wo != null
+LET eng = DOCUMENT(CONCAT('engines/', wo.engineId))
+LET ac  = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
+LET cur_tech = FIRST(
+  FOR t, e IN 1..1 OUTBOUND wo performedBy
+    FILTER e.validTo == null OR e.validTo > @now
+    SORT e.validFrom DESC
+    RETURN { id: t._key, name: t.name, homeBase: t.homeBase }
+)
+RETURN {
+  wo:          KEEP(wo, ['_key','type','status','scheduledHourStart','estimatedHours','engineId','description']),
+  engine:      KEEP(eng, ['_key','driverSubsystems','riskBucket']),
+  aircraft:    { tailNumber: ac.tailNumber, base: ac.base },
+  currentTech: cur_tech
+}
+"""
+
+# Technicians eligible to take a specific work order: same base + overlapping cert.
+# Bind params: @wo_key (string), @now (Unix seconds int).
+Q_ELIGIBLE_TECHNICIANS_FOR_WO = """
+LET wo  = DOCUMENT(CONCAT('workOrders/', @wo_key))
+LET eng = DOCUMENT(CONCAT('engines/', wo.engineId))
+LET ac  = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
+FOR t IN technicians
+  FILTER t.homeBase == ac.base
+  LET matching = INTERSECTION(t.certifications, eng.driverSubsystems)
+  FILTER LENGTH(matching) > 0
+  LET wos = (
+    FOR w, e IN 1..1 INBOUND t performedBy
+      FILTER w.generatedByPlanner == true
+      FILTER e.validTo == null OR e.validTo > @now
+      RETURN { woKey: w._key, scheduledHourStart: w.scheduledHourStart,
+               estimatedHours: w.estimatedHours }
+  )
+  RETURN {
+    key: t._key, name: t.name, homeBase: t.homeBase,
+    certifications: t.certifications, matchingCerts: matching,
+    currentWorkOrders: LENGTH(wos), schedule: wos
+  }
+"""
+
+# Expire all currently-valid performedBy edges for a work order.
+# Bind params: @wo_id (full doc ID e.g. "workOrders/PLN-abc"), @now (Unix seconds int).
+Q_EXPIRE_PERFORMED_BY = """
+FOR e IN performedBy
+  FILTER e._from == @wo_id
+  FILTER e.validTo == null OR e.validTo > @now
+  UPDATE e WITH { validTo: @now } IN performedBy
 """
 
 # Cascade delete helpers — bind-parameterised, called from planning._cascade_delete

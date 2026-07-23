@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
@@ -35,6 +36,8 @@ from backend.aql import (
     Q_CASCADE_ENGINES_FOR_AIRCRAFT,
     Q_CASCADE_WO_KEYS_FOR_ENGINES,
     Q_CHAT_WO_BY_ENGINE,
+    Q_ELIGIBLE_TECHNICIANS_FOR_WO,
+    Q_EXPIRE_PERFORMED_BY,
     Q_ONTOLOGY_FULL,
     Q_PLAN_COLLECT_IDS,
     Q_PLAN_DELETE_CONSUMED,
@@ -43,6 +46,9 @@ from backend.aql import (
     Q_PLAN_DELETE_WOS,
     Q_PLAN_FLEET_CONTEXT,
     Q_PLAN_WORK_ORDERS,
+    Q_PLAN_WORK_ORDERS_AT_TIME,
+    Q_TECH_CURRENT_SCHEDULE,
+    Q_WO_REASSIGN_CONTEXT,
 )
 from backend.db import get_db
 
@@ -61,6 +67,9 @@ _MUTATING_RE = re.compile(r"\b(INSERT|UPDATE|REPLACE|REMOVE|UPSERT)\b", re.IGNOR
 _checkpointer = InMemorySaver()
 _chat_agent = None
 _chat_agent_lock = asyncio.Lock()
+
+# Unix timestamp used as "no expiry" sentinel on temporal edges (year 2286).
+_VALID_INF: int = 9_999_999_999
 
 # Map from entity_type (as used by the LLM) to collection name — accept both forms
 _COLLECTION_MAP: dict[str, str] = {
@@ -83,7 +92,8 @@ _EDITABLE_FIELDS: dict[str, set[str]] = {
     "engines":     {"model", "riskBucket", "predictedRUL"},
     "technicians": {"name", "homeBase"},
     "parts":       {"name", "stockLevel", "leadTimeDays"},
-    "workOrders":  {"status", "deadline", "description"},
+    "workOrders":  {"status", "deadline", "description",
+                    "scheduledHourStart", "scheduledStart", "scheduledEnd", "estimatedHours"},
     "subsystems":  {"name"},
 }
 
@@ -120,7 +130,6 @@ class TechnicianTimeline(BaseModel):
 
 class MaintenancePlan(BaseModel):
     work_orders: list[PlannedEngineItem]
-    timelines: list[TechnicianTimeline] = []
     reasoning_summary: str
 
 
@@ -130,6 +139,17 @@ class MaintenancePlan(BaseModel):
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _working_day_to_date(start: date, working_day: int) -> date:
+    """Return the Mon-Fri calendar date that is `working_day` business days after `start`."""
+    d = start
+    remaining = working_day
+    while remaining > 0:
+        d += timedelta(days=1)
+        if d.weekday() < 5:   # 0=Mon … 4=Fri
+            remaining -= 1
+    return d
 
 
 def _deadline(engine: dict, has_blocking: bool, max_lead: int) -> tuple[str, str]:
@@ -142,6 +162,117 @@ def _deadline(engine: dict, has_blocking: bool, max_lead: int) -> tuple[str, str
     fpd = max(engine["aircraft"].get("flightsPerDay", 1), 1)
     days = (engine["predictedRUL"] + fpd - 1) // fpd  # ceiling division
     return "", (today + timedelta(days=days)).isoformat()
+
+
+_HOURS_PER_DAY: float = 8.0
+
+# Deterministic maintenance hours per subsystem type
+_SUBSYSTEM_HOURS: dict[str, float] = {
+    "fan": 3.0, "LPC": 5.0, "HPC": 12.0,
+    "combustor": 6.0, "HPT": 8.0, "LPT": 8.0,
+}
+
+
+def _maint_hours(driver_subsystems: list[str]) -> float:
+    return min(sum(_SUBSYSTEM_HOURS.get(s, 4.0) for s in driver_subsystems), 20.0)
+
+
+def _flights_remaining(engine: dict) -> float:
+    """Lower value = more urgent."""
+    fpd = max(engine["aircraft"].get("flightsPerDay", 1), 1)
+    return engine["predictedRUL"] * fpd
+
+
+def _build_technician_schedule(
+    items: list[tuple["PlannedEngineItem", dict, list[str]]],
+    today: date,
+) -> list[dict]:
+    """
+    Produce a guaranteed-serial, non-overlapping schedule for one technician.
+
+    items must already be sorted by urgency (flights_remaining ascending, critical before warning).
+    Each item is (PlannedEngineItem, engine_dict, validated_blocking_part_ids).
+    Returns a list of task dicts ready for the SSE timeline event.
+    """
+    busy: list[tuple[float, float]] = []
+
+    def find_slot(earliest: float, duration: float) -> float:
+        """Return the earliest start >= earliest that fits without overlapping busy."""
+        start = earliest
+        changed = True
+        while changed:
+            changed = False
+            end = start + duration
+            for b0, b1 in sorted(busy):
+                if b0 < end and b1 > start:
+                    start = b1
+                    changed = True
+                    break
+        return start
+
+    def to_day(h: float) -> int:
+        return int(h // _HOURS_PER_DAY)
+
+    def to_end_day(h: float, dur: float) -> int:
+        return int((h + dur - 0.001) // _HOURS_PER_DAY)
+
+    def to_date(day: int) -> str:
+        return _working_day_to_date(today, day).isoformat()
+
+    tasks: list[dict] = []
+
+    # Pass 1 — schedule all procurement tasks serially from hour 0.
+    # By doing procurement first we know the earliest parts-arrive time for pass 2.
+    for wo, engine, blocking_ids in items:
+        if not wo.has_blocking_parts:
+            continue
+        dur = 2.0
+        sh = find_slot(0.0, dur)
+        busy.append((sh, sh + dur))
+        tasks.append({
+            "engine_id": wo.engine_id, "task_type": "procurement",
+            "hour_start": sh, "hour_end": sh + dur,
+            "day_start": to_day(sh), "day_end": to_end_day(sh, dur),
+            "estimated_hours": dur,
+            "description": (
+                f"Order parts for engine #{wo.engine_id} "
+                f"({', '.join(engine.get('driverSubsystems', []))})"
+            ),
+            "scheduled_start": to_date(to_day(sh)),
+            "scheduled_end": to_date(to_end_day(sh, dur)),
+        })
+
+    # Pass 2 — schedule maintenance tasks.
+    # Engines with no blocking parts fill the procurement wait window.
+    for wo, engine, blocking_ids in items:
+        parts_map = {p["id"]: p for p in engine.get("parts", [])}
+        max_lead_days = (
+            max(
+                (parts_map[pid]["leadTimeDays"] for pid in blocking_ids if pid in parts_map),
+                default=0,
+            )
+            if wo.has_blocking_parts and blocking_ids
+            else 0
+        )
+        earliest_h = max_lead_days * _HOURS_PER_DAY
+        dur = _maint_hours(engine.get("driverSubsystems", []))
+        sh = find_slot(earliest_h, dur)
+        busy.append((sh, sh + dur))
+        tasks.append({
+            "engine_id": wo.engine_id, "task_type": "maintenance",
+            "hour_start": sh, "hour_end": sh + dur,
+            "day_start": to_day(sh), "day_end": to_end_day(sh, dur),
+            "estimated_hours": dur,
+            "description": (
+                f"Maintenance: {', '.join(engine.get('driverSubsystems', []))} "
+                f"on engine #{wo.engine_id}"
+            ),
+            "scheduled_start": to_date(to_day(sh)),
+            "scheduled_end": to_date(to_end_day(sh, dur)),
+        })
+
+    tasks.sort(key=lambda t: (t["day_start"], t["task_type"]))
+    return tasks
 
 
 # ---------------------------------------------------------------------------
@@ -181,39 +312,23 @@ async def plan_run() -> StreamingResponse:
                     "step": 2, "total": 5,
                 })
 
-                # Build prompt
+                # Build prompt — LLM is responsible for assignment only.
+                # Scheduling math (serial ordering, hour estimation, Gantt) is done in Python.
                 prompt = (
                     "You are an aircraft maintenance scheduler. "
-                    "Given the fleet context below, produce an optimised maintenance plan in three steps.\n\n"
+                    "Given the fleet context below assign every engine to a technician "
+                    "and identify which parts are missing.\n\n"
 
-                    "STEP 1 — ASSIGN\n"
-                    f"There are {len(engines)} engines in the fleet context. "
-                    "EVERY engine must appear in work_orders — do not skip any. "
-                    "Assign each engine to exactly one technician. "
-                    "Prefer technicians where canServiceDegradingSubs=true; if none exist at the base use any technician listed. "
-                    "Schedule critical engines before warning, and within each tier prioritise lower predictedRUL. "
-                    "Identify which parts are blocking (stockLevel == 0).\n\n"
-
-                    "STEP 2 — ESTIMATE HOURS\n"
-                    "For each engine, estimate working hours for the maintenance task based on driverSubsystems:\n"
-                    "  - Monitoring/sensor subsystems: 2–4 h\n"
-                    "  - Hydraulic or fuel systems: 4–8 h\n"
-                    "  - Core engine or compressor work: 8–16 h\n"
-                    "  - Multiple subsystems: sum estimates, cap at 20 h per task\n"
-                    "Procurement admin (ordering missing parts) always takes 2 h of work.\n\n"
-
-                    "STEP 3 — BUILD TIMELINE\n"
-                    "For each technician, build a day-by-day schedule (day 0 = today, 8 working hours per day).\n"
-                    "Rules:\n"
-                    "  a) Procurement tasks always start on day 0 — order parts immediately.\n"
-                    "  b) Maintenance with all parts in stock can start on day 0.\n"
-                    "  c) Maintenance blocked on missing parts starts no earlier than the maximum lead time "
-                    "(in days) of those parts.\n"
-                    "  d) A technician works on one task at a time — tasks must not overlap.\n"
-                    "  e) Fill waiting time: schedule available-parts maintenance during procurement wait.\n"
-                    "  f) day_start and day_end are calendar days (integers). "
-                    "A 6 h task starting day 4 → day_start=4, day_end=4. "
-                    "A 10 h task starting day 4 → day_start=4, day_end=5.\n\n"
+                    "RULES\n"
+                    f"• There are {len(engines)} engines listed. EVERY engine must appear "
+                    "in work_orders — do not skip any.\n"
+                    "• Assign each engine to exactly one technician from its technicians list.\n"
+                    "• Prefer technicians where canServiceDegradingSubs=true. "
+                    "If none qualify, assign any technician at the base.\n"
+                    "• Distribute load across technicians at each base — avoid giving all engines "
+                    "to one technician when alternatives exist.\n"
+                    "• Set has_blocking_parts=true and list blocking_part_ids for any part "
+                    "with stockLevel==0.\n\n"
 
                     "Return ONLY structured JSON — no prose outside the JSON.\n\n"
                     f"Fleet context (JSON):\n{json.dumps(engines, indent=2)}"
@@ -228,241 +343,192 @@ async def plan_run() -> StreamingResponse:
                 structured = llm.with_structured_output(MaintenancePlan)
                 plan: MaintenancePlan = await structured.ainvoke(prompt)  # type: ignore[assignment]
 
-                yield _sse("progress", {"message": "Validating plan and writing work orders…", "step": 3, "total": 5})
+                yield _sse("progress", {"message": "Building optimised schedule…", "step": 3, "total": 5})
 
-                # (engine_id, "procurement"|"maintenance") → ScheduledTask from LLM timeline
-                schedule_lookup: dict[tuple[str, str], ScheduledTask] = {
-                    (task.engine_id, task.task_type.lower()): task
-                    for tl in plan.timelines
-                    for task in tl.tasks
-                }
-                tech_name_map: dict[str, str] = {
-                    t["id"]: t["name"]
-                    for e in engines
-                    for t in e["technicians"]
-                }
-
-                # Build lookup sets for validation
                 eng_map = {e["id"]: e for e in engines}
                 valid_tech_ids = {t["id"] for e in engines for t in e["technicians"]}
                 valid_part_ids = {p["id"] for e in engines for p in e["parts"]}
-
-                total_wo = maint_count = proc_count = 0
-                planned_engines: set[str] = set()
+                tech_name_map: dict[str, str] = {
+                    t["id"]: t["name"] for e in engines for t in e["technicians"]
+                }
                 today = date.today()
                 now_iso = datetime.now(timezone.utc).isoformat()
 
+                # Merge LLM assignments with fallback for any engine it missed
+                assignments: dict[str, tuple[str, list[str], bool]] = {}
                 for item in plan.work_orders:
                     engine = eng_map.get(item.engine_id)
                     if not engine:
                         continue
+                    tech_id = (
+                        item.technician_id if item.technician_id in valid_tech_ids
+                        else (engine["technicians"][0]["id"] if engine["technicians"] else None)
+                    )
+                    if not tech_id:
+                        continue
+                    blocking_ids = [p for p in item.blocking_part_ids if p in valid_part_ids]
+                    assignments[item.engine_id] = (tech_id, blocking_ids, item.has_blocking_parts)
 
-                    # Validate / fall back technician
-                    if item.technician_id in valid_tech_ids:
-                        tech_id = item.technician_id
-                    elif engine["technicians"]:
-                        tech_id = engine["technicians"][0]["id"]
-                    else:
+                for eid, engine in eng_map.items():
+                    if eid in assignments or not engine["technicians"]:
+                        continue
+                    tech_id = engine["technicians"][0]["id"]
+                    blocking_ids = [p["id"] for p in engine["parts"] if p["blocking"]]
+                    assignments[eid] = (tech_id, blocking_ids, bool(blocking_ids))
+
+                # Group by technician, sort by urgency: critical first, then flights_remaining asc
+                _BUCKET_ORDER = {"critical": 0, "warning": 1}
+                tech_items: dict[str, list[tuple[str, dict, list[str], bool]]] = {}
+                for eid, (tech_id, blocking_ids, has_blocking) in assignments.items():
+                    engine = eng_map[eid]
+                    tech_items.setdefault(tech_id, []).append(
+                        (eid, engine, blocking_ids, has_blocking)
+                    )
+                for items in tech_items.values():
+                    items.sort(key=lambda x: (
+                        _BUCKET_ORDER.get(x[1]["riskBucket"], 2),
+                        _flights_remaining(x[1]),
+                    ))
+
+                # Build guaranteed-serial schedules — one per technician
+                # Wrap items into the shape _build_technician_schedule expects
+                tech_schedules: dict[str, list[dict]] = {}
+                for tech_id, items in tech_items.items():
+                    wrapped = [
+                        (
+                            PlannedEngineItem(
+                                engine_id=eid,
+                                technician_id=tech_id,
+                                has_blocking_parts=has_blocking,
+                                blocking_part_ids=blocking_ids,
+                            ),
+                            engine,
+                            blocking_ids,
+                        )
+                        for eid, engine, blocking_ids, has_blocking in items
+                    ]
+                    tech_schedules[tech_id] = _build_technician_schedule(wrapped, today)
+
+                def _get_sched(tech_id: str, eid: str, task_type: str) -> dict | None:
+                    return next(
+                        (t for t in tech_schedules.get(tech_id, [])
+                         if t["engine_id"] == eid and t["task_type"] == task_type),
+                        None,
+                    )
+
+                def _write_wo(wo_doc: dict, engine_id: str, t_id: str,
+                              part_ids: list[str]) -> None:
+                    wo_key = wo_doc["_key"]
+                    db.collection("workOrders").insert(wo_doc)
+                    db.collection("maintains").insert(
+                        {"_from": f"workOrders/{wo_key}", "_to": f"engines/{engine_id}"}
+                    )
+                    # Temporal edge: validFrom = now, validTo = sentinel "infinity".
+                    # Reassignments expire this edge and add a new one, preserving history.
+                    db.collection("performedBy").insert({
+                        "_from": f"workOrders/{wo_key}",
+                        "_to":   f"technicians/{t_id}",
+                        "validFrom": int(time.time()),
+                        "validTo":   _VALID_INF,
+                    })
+                    for pid in part_ids:
+                        db.collection("consumed").insert(
+                            {"_from": f"workOrders/{wo_key}", "_to": f"parts/{pid}"}
+                        )
+
+                total_wo = maint_count = proc_count = 0
+                planned_engines: set[str] = set()
+
+                for tech_id, items in tech_items.items():
+                    tech_name = tech_name_map.get(tech_id, tech_id)
+                    for eid, engine, blocking_ids, has_blocking in items:
+                        has_blocking = has_blocking and bool(blocking_ids)
+                        max_lead = max(
+                            (p["leadTimeDays"] for p in engine["parts"]
+                             if p["id"] in blocking_ids),
+                            default=0,
+                        )
+                        proc_dl, maint_dl = _deadline(engine, has_blocking, max_lead)
+                        flights_left = int(_flights_remaining(engine))
+
                         yield _sse("progress", {
-                            "message": f"Engine {item.engine_id}: no technician at base, skipping.",
+                            "message": (
+                                f"Engine #{eid} ({engine['riskBucket']}, "
+                                f"RUL={engine['predictedRUL']}, "
+                                f"~{flights_left} flights remaining, "
+                                f"{engine['aircraft']['tailNumber']}) → {tech_name}"
+                            ),
                             "step": 3, "total": 5,
                         })
-                        continue
 
-                    tech_name = next(
-                        (t["name"] for t in engine["technicians"] if t["id"] == tech_id),
-                        tech_id,
-                    )
-
-                    # Validate blocking parts
-                    blocking_ids = [p for p in item.blocking_part_ids if p in valid_part_ids]
-                    has_blocking = item.has_blocking_parts and bool(blocking_ids)
-                    max_lead = max(
-                        (p["leadTimeDays"] for p in engine["parts"] if p["id"] in blocking_ids),
-                        default=0,
-                    )
-                    proc_dl, maint_dl = _deadline(engine, has_blocking, max_lead)
-
-                    yield _sse("progress", {
-                        "message": (
-                            f"Engine #{item.engine_id} ({engine['riskBucket']}, "
-                            f"RUL={engine['predictedRUL']}, {engine['aircraft']['tailNumber']}) "
-                            f"→ {tech_name}"
-                        ),
-                        "step": 3, "total": 5,
-                    })
-
-                    def _write_wo(wo_doc: dict, engine_id: str, tech_id: str,
-                                  part_ids: list[str]) -> None:
-                        wo_key = wo_doc["_key"]
-                        db.collection("workOrders").insert(wo_doc)
-                        db.collection("maintains").insert(
-                            {"_from": f"workOrders/{wo_key}", "_to": f"engines/{engine_id}"}
-                        )
-                        db.collection("performedBy").insert(
-                            {"_from": f"workOrders/{wo_key}", "_to": f"technicians/{tech_id}"}
-                        )
-                        for pid in part_ids:
-                            db.collection("consumed").insert(
-                                {"_from": f"workOrders/{wo_key}", "_to": f"parts/{pid}"}
+                        if has_blocking:
+                            sched = _get_sched(tech_id, eid, "procurement")
+                            wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
+                            wo_doc = {
+                                "_key": wo_key, "generatedByPlanner": True,
+                                "type": "procurement", "engineId": eid,
+                                "technicianId": tech_id, "deadline": proc_dl,
+                                "riskBucket": engine["riskBucket"], "status": "open",
+                                "createdAt": now_iso,
+                                "estimatedHours": sched["estimated_hours"] if sched else 2.0,
+                                "scheduledHourStart": sched["hour_start"] if sched else 0.0,
+                                "scheduledStart": sched["scheduled_start"] if sched else today.isoformat(),
+                                "scheduledEnd": sched["scheduled_end"] if sched else today.isoformat(),
+                                "description": sched["description"] if sched else (
+                                    f"Order parts for engine #{eid} "
+                                    f"({', '.join(engine.get('driverSubsystems', []))})"
+                                ),
+                            }
+                            await asyncio.to_thread(
+                                partial(_write_wo, wo_doc, eid, tech_id, blocking_ids)
                             )
+                            yield _sse("work_order", {
+                                "woKey": wo_key, "type": "procurement",
+                                "engineId": eid, "technicianName": tech_name,
+                                "deadline": proc_dl, "status": "open",
+                                "description": wo_doc["description"],
+                                "estimatedHours": wo_doc["estimatedHours"],
+                                "scheduledHourStart": wo_doc["scheduledHourStart"],
+                                "scheduledStart": wo_doc["scheduledStart"],
+                                "scheduledEnd": wo_doc["scheduledEnd"],
+                            })
+                            total_wo += 1
+                            proc_count += 1
 
-                    # Procurement work order (if blocking parts)
-                    if has_blocking:
-                        wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
-                        proc_sched = schedule_lookup.get((item.engine_id, "procurement"))
-                        wo_doc = {
-                            "_key": wo_key,
-                            "generatedByPlanner": True,
-                            "type": "procurement",
-                            "engineId": item.engine_id,
-                            "technicianId": tech_id,
-                            "deadline": proc_dl,
-                            "riskBucket": engine["riskBucket"],
-                            "status": "open",
-                            "createdAt": now_iso,
-                            "estimatedHours": proc_sched.estimated_hours if proc_sched else 2.0,
-                            "scheduledStart": (today + timedelta(days=proc_sched.day_start)).isoformat() if proc_sched else today.isoformat(),
-                            "scheduledEnd": (today + timedelta(days=proc_sched.day_end)).isoformat() if proc_sched else today.isoformat(),
-                            "description": (
-                                f"Procure blocking parts for engine #{item.engine_id} "
-                                f"({', '.join(engine.get('driverSubsystems', []))})"
-                            ),
-                        }
-                        await asyncio.to_thread(
-                            partial(_write_wo, wo_doc, item.engine_id, tech_id, blocking_ids)
-                        )
-                        yield _sse("work_order", {
-                            "woKey": wo_key, "type": "procurement",
-                            "engineId": item.engine_id, "technicianName": tech_name,
-                            "deadline": proc_dl, "status": "open",
-                            "description": wo_doc["description"],
-                            "estimatedHours": wo_doc["estimatedHours"],
-                            "scheduledStart": wo_doc["scheduledStart"],
-                            "scheduledEnd": wo_doc["scheduledEnd"],
-                        })
-                        total_wo += 1
-                        proc_count += 1
-
-                    # Maintenance work order
-                    wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
-                    maint_status = "pending-parts" if has_blocking else "open"
-                    maint_sched = schedule_lookup.get((item.engine_id, "maintenance"))
-                    wo_doc = {
-                        "_key": wo_key,
-                        "generatedByPlanner": True,
-                        "type": "maintenance",
-                        "engineId": item.engine_id,
-                        "technicianId": tech_id,
-                        "deadline": maint_dl,
-                        "riskBucket": engine["riskBucket"],
-                        "status": maint_status,
-                        "createdAt": now_iso,
-                        "estimatedHours": maint_sched.estimated_hours if maint_sched else None,
-                        "scheduledStart": (today + timedelta(days=maint_sched.day_start)).isoformat() if maint_sched else None,
-                        "scheduledEnd": (today + timedelta(days=maint_sched.day_end)).isoformat() if maint_sched else None,
-                        "description": (
-                            f"Scheduled maintenance: {', '.join(engine.get('driverSubsystems', []))} "
-                            f"(engine #{item.engine_id})"
-                        ),
-                    }
-                    await asyncio.to_thread(
-                        partial(_write_wo, wo_doc, item.engine_id, tech_id, [])
-                    )
-                    yield _sse("work_order", {
-                        "woKey": wo_key, "type": "maintenance",
-                        "engineId": item.engine_id, "technicianName": tech_name,
-                        "deadline": maint_dl, "status": maint_status,
-                        "description": wo_doc["description"],
-                        "estimatedHours": wo_doc["estimatedHours"],
-                        "scheduledStart": wo_doc["scheduledStart"],
-                        "scheduledEnd": wo_doc["scheduledEnd"],
-                    })
-                    total_wo += 1
-                    maint_count += 1
-                    planned_engines.add(item.engine_id)
-
-                # Fallback: create bare work orders for any engines the LLM omitted
-                for eid, engine in eng_map.items():
-                    if eid in planned_engines or not engine["technicians"]:
-                        continue
-                    tech = engine["technicians"][0]
-                    tech_id = tech["id"]
-                    tech_name = tech["name"]
-                    has_blocking = any(p["blocking"] for p in engine["parts"])
-                    blocking_ids = [p["id"] for p in engine["parts"] if p["blocking"]]
-                    max_lead = max(
-                        (p["leadTimeDays"] for p in engine["parts"] if p["id"] in blocking_ids),
-                        default=0,
-                    )
-                    proc_dl, maint_dl = _deadline(engine, has_blocking, max_lead)
-
-                    yield _sse("progress", {
-                        "message": (
-                            f"Engine #{eid} ({engine['riskBucket']}, RUL={engine['predictedRUL']}, "
-                            f"{engine['aircraft']['tailNumber']}) → {tech_name} [auto-assigned]"
-                        ),
-                        "step": 3, "total": 5,
-                    })
-
-                    if has_blocking:
+                        maint_status = "pending-parts" if has_blocking else "open"
+                        sched = _get_sched(tech_id, eid, "maintenance")
                         wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
                         wo_doc = {
                             "_key": wo_key, "generatedByPlanner": True,
-                            "type": "procurement", "engineId": eid, "technicianId": tech_id,
-                            "deadline": proc_dl, "riskBucket": engine["riskBucket"],
-                            "status": "open", "createdAt": now_iso,
-                            "estimatedHours": 2.0,
-                            "scheduledStart": today.isoformat(),
-                            "scheduledEnd": today.isoformat(),
-                            "description": (
-                                f"Procure blocking parts for engine #{eid} "
-                                f"({', '.join(engine.get('driverSubsystems', []))})"
+                            "type": "maintenance", "engineId": eid,
+                            "technicianId": tech_id, "deadline": maint_dl,
+                            "riskBucket": engine["riskBucket"], "status": maint_status,
+                            "createdAt": now_iso,
+                            "estimatedHours": sched["estimated_hours"] if sched else _maint_hours(engine.get("driverSubsystems", [])),
+                            "scheduledHourStart": sched["hour_start"] if sched else None,
+                            "scheduledStart": sched["scheduled_start"] if sched else None,
+                            "scheduledEnd": sched["scheduled_end"] if sched else None,
+                            "description": sched["description"] if sched else (
+                                f"Maintenance: {', '.join(engine.get('driverSubsystems', []))} "
+                                f"(engine #{eid})"
                             ),
                         }
                         await asyncio.to_thread(
-                            partial(_write_wo, wo_doc, eid, tech_id, blocking_ids)
+                            partial(_write_wo, wo_doc, eid, tech_id, [])
                         )
                         yield _sse("work_order", {
-                            "woKey": wo_key, "type": "procurement",
+                            "woKey": wo_key, "type": "maintenance",
                             "engineId": eid, "technicianName": tech_name,
-                            "deadline": proc_dl, "status": "open",
+                            "deadline": maint_dl, "status": maint_status,
                             "description": wo_doc["description"],
-                            "estimatedHours": 2.0,
+                            "estimatedHours": wo_doc["estimatedHours"],
+                            "scheduledHourStart": wo_doc["scheduledHourStart"],
                             "scheduledStart": wo_doc["scheduledStart"],
                             "scheduledEnd": wo_doc["scheduledEnd"],
                         })
                         total_wo += 1
-                        proc_count += 1
-
-                    wo_key = f"PLN-{uuid.uuid4().hex[:8]}"
-                    maint_status = "pending-parts" if has_blocking else "open"
-                    wo_doc = {
-                        "_key": wo_key, "generatedByPlanner": True,
-                        "type": "maintenance", "engineId": eid, "technicianId": tech_id,
-                        "deadline": maint_dl, "riskBucket": engine["riskBucket"],
-                        "status": maint_status, "createdAt": now_iso,
-                        "estimatedHours": None,
-                        "scheduledStart": None, "scheduledEnd": None,
-                        "description": (
-                            f"Scheduled maintenance: {', '.join(engine.get('driverSubsystems', []))} "
-                            f"(engine #{eid})"
-                        ),
-                    }
-                    await asyncio.to_thread(
-                        partial(_write_wo, wo_doc, eid, tech_id, [])
-                    )
-                    yield _sse("work_order", {
-                        "woKey": wo_key, "type": "maintenance",
-                        "engineId": eid, "technicianName": tech_name,
-                        "deadline": maint_dl, "status": maint_status,
-                        "description": wo_doc["description"],
-                        "estimatedHours": None,
-                        "scheduledStart": None, "scheduledEnd": None,
-                    })
-                    total_wo += 1
-                    maint_count += 1
-                    planned_engines.add(eid)
+                        maint_count += 1
+                        planned_engines.add(eid)
 
                 yield _sse("summary", {
                     "totalWorkOrders": total_wo,
@@ -472,26 +538,28 @@ async def plan_run() -> StreamingResponse:
                     "reasoningSummary": plan.reasoning_summary,
                 })
 
-                if plan.timelines:
-                    timeline_payload = [
-                        {
-                            "technicianId": tl.technician_id,
-                            "technicianName": tech_name_map.get(tl.technician_id, tl.technician_id),
-                            "tasks": [
-                                {
-                                    "engineId": t.engine_id,
-                                    "taskType": t.task_type.lower(),
-                                    "dayStart": t.day_start,
-                                    "dayEnd": t.day_end,
-                                    "estimatedHours": t.estimated_hours,
-                                    "description": t.description,
-                                }
-                                for t in tl.tasks
-                            ],
-                        }
-                        for tl in plan.timelines
-                    ]
-                    yield _sse("timeline", {"timelines": timeline_payload})
+                timeline_payload = [
+                    {
+                        "technicianId": tech_id,
+                        "technicianName": tech_name_map.get(tech_id, tech_id),
+                        "tasks": [
+                            {
+                                "engineId": t["engine_id"],
+                                "taskType": t["task_type"],
+                                "hourStart": t["hour_start"],
+                                "hourEnd": t["hour_end"],
+                                "dayStart": t["day_start"],
+                                "dayEnd": t["day_end"],
+                                "estimatedHours": t["estimated_hours"],
+                                "description": t["description"],
+                            }
+                            for t in tasks
+                        ],
+                    }
+                    for tech_id, tasks in tech_schedules.items()
+                    if tasks
+                ]
+                yield _sse("timeline", {"timelines": timeline_payload})
 
                 yield _sse("done", {})
 
@@ -538,6 +606,19 @@ async def plan_work_orders() -> JSONResponse:
     db = get_db()
     wos = await asyncio.to_thread(lambda: list(db.aql.execute(Q_PLAN_WORK_ORDERS)))
     return JSONResponse({"workOrders": wos})
+
+
+@router.get("/schedule-at")
+async def plan_schedule_at(t: int) -> JSONResponse:
+    """Return the work-order schedule as it existed at Unix timestamp `t` (seconds).
+    Uses temporal performedBy edges to reconstruct past assignments.
+    Example: GET /api/plan/schedule-at?t=1753228800
+    """
+    db = get_db()
+    wos = await asyncio.to_thread(
+        lambda: list(db.aql.execute(Q_PLAN_WORK_ORDERS_AT_TIME, bind_vars={"t": t}))
+    )
+    return JSONResponse({"t": t, "workOrders": wos})
 
 
 # ---------------------------------------------------------------------------
@@ -632,9 +713,18 @@ def propose_delete_entity(entity_type: str, entity_key: str, cascade_preview: st
 @tool
 def propose_create_relationship(edge_type: str, from_id: str, to_id: str) -> str:
     """Propose creating an edge between two existing entities.
-    edge_type: installedOn | performedBy | certifiedFor | maintains | consumed.
+    edge_type: installedOn | certifiedFor | maintains | consumed.
+    NEVER use this for performedBy — use propose_reassign_work_order instead.
     from_id / to_id: full ArangoDB document IDs e.g. 'engines/42'.
     Does NOT write to the DB — returns a proposal."""
+    if edge_type == "performedBy":
+        return json.dumps({
+            "error": (
+                "Do NOT create performedBy edges directly. "
+                "Use propose_reassign_work_order(wo_key, new_tech_key) instead — "
+                "it enforces base, certification, and schedule constraints."
+            )
+        })
     return json.dumps({
         "__propose__": True,
         "id": f"edit-{uuid.uuid4().hex[:12]}",
@@ -651,8 +741,17 @@ def propose_create_relationship(edge_type: str, from_id: str, to_id: str) -> str
 @tool
 def propose_delete_relationship(edge_type: str, from_id: str, to_id: str) -> str:
     """Propose deleting an edge between two entities.
-    edge_type: installedOn | performedBy | certifiedFor | maintains | consumed.
+    edge_type: installedOn | certifiedFor | maintains | consumed.
+    NEVER use this for performedBy — use propose_reassign_work_order instead.
     Does NOT write to the DB — returns a proposal."""
+    if edge_type == "performedBy":
+        return json.dumps({
+            "error": (
+                "Do NOT delete performedBy edges directly. "
+                "Use propose_reassign_work_order(wo_key, new_tech_key) instead — "
+                "it expires the old edge and validates the new assignment."
+            )
+        })
     return json.dumps({
         "__propose__": True,
         "id": f"edit-{uuid.uuid4().hex[:12]}",
@@ -666,10 +765,174 @@ def propose_delete_relationship(edge_type: str, from_id: str, to_id: str) -> str
     })
 
 
+@tool
+async def check_technician_availability(tech_key: str) -> str:
+    """Return a technician's current work order schedule (hour slots).
+    Call this before proposing a reassignment to detect conflicts.
+    Returns each WO's scheduledHourStart and estimatedHours so you can check for overlap."""
+    now = int(time.time())
+    db = get_db()
+    rows = await asyncio.to_thread(
+        lambda: list(db.aql.execute(Q_TECH_CURRENT_SCHEDULE,
+                                    bind_vars={"tech_key": tech_key, "now": now}))
+    )
+    tech = await asyncio.to_thread(lambda: db.collection("technicians").get(tech_key))
+    name = tech.get("name", tech_key) if tech else tech_key
+    return json.dumps({
+        "technician": {"key": tech_key, "name": name,
+                       "homeBase": tech.get("homeBase") if tech else None},
+        "workOrders": rows,
+        "note": f"{len(rows)} currently-assigned work orders",
+    })
+
+
+@tool
+async def propose_reassign_work_order(wo_key: str, new_tech_key: str) -> str:
+    """Validate and propose reassigning a work order to a different technician.
+
+    Enforces three hard constraints before creating a proposal:
+      1. The new technician must be at the SAME BASE as the engine's aircraft.
+      2. The new technician must hold a certification for at least one of the
+         engine's driver subsystems.
+      3. The new technician must have no schedule overlap with the work order's
+         time slot (scheduledHourStart to scheduledHourStart + estimatedHours).
+
+    If any constraint fails, returns an explanation with enough context for the
+    user to pick a different technician or push the work back.
+    Does NOT write to the database — returns a proposal for user confirmation.
+    """
+    now = int(time.time())
+    db = get_db()
+
+    ctx_rows = await asyncio.to_thread(
+        lambda: list(db.aql.execute(Q_WO_REASSIGN_CONTEXT,
+                                    bind_vars={"wo_key": wo_key, "now": now}))
+    )
+    if not ctx_rows or ctx_rows[0] is None:
+        return json.dumps({"error": f"Work order '{wo_key}' not found."})
+    ctx = ctx_rows[0]
+    wo      = ctx["wo"]
+    engine  = ctx["engine"]
+    base    = ctx["aircraft"]["base"]
+    cur     = ctx.get("currentTech") or {}
+    driver_subs: set[str] = set(engine.get("driverSubsystems") or [])
+
+    new_tech = await asyncio.to_thread(lambda: db.collection("technicians").get(new_tech_key))
+    if not new_tech:
+        return json.dumps({
+            "error": (
+                f"Technician key '{new_tech_key}' not found. "
+                f"Technician keys look like T001, T002, … T010 — use the 'key' field "
+                f"from find_eligible_technicians('{wo_key}') to get valid keys."
+            )
+        })
+
+    # 1 — base check
+    if new_tech.get("homeBase") != base:
+        return json.dumps({
+            "error": (
+                f"Technician {new_tech['name']} is based at {new_tech['homeBase']}, "
+                f"but engine #{wo['engineId']} is at {base}. "
+                f"Cross-base reassignment is not allowed. "
+                f"Find technicians at {base}: "
+                f"FOR t IN technicians FILTER t.homeBase == '{base}' RETURN t"
+            )
+        })
+
+    # 2 — certification check
+    tech_certs: set[str] = set(new_tech.get("certifications") or [])
+    if not tech_certs & driver_subs:
+        return json.dumps({
+            "error": (
+                f"Technician {new_tech['name']} holds certifications {sorted(tech_certs)} "
+                f"but engine #{wo['engineId']} needs coverage for {sorted(driver_subs)}. "
+                f"No overlap — cannot reassign."
+            )
+        })
+
+    # 3 — schedule conflict check
+    wo_start = wo.get("scheduledHourStart")
+    wo_dur   = wo.get("estimatedHours") or 8.0
+    if wo_start is not None:
+        existing = await asyncio.to_thread(
+            lambda: list(db.aql.execute(Q_TECH_CURRENT_SCHEDULE,
+                                        bind_vars={"tech_key": new_tech_key, "now": now}))
+        )
+        wo_end = wo_start + wo_dur
+        for slot in existing:
+            s = slot.get("scheduledHourStart")
+            d = slot.get("estimatedHours") or 8.0
+            if s is not None and s < wo_end and (s + d) > wo_start:
+                return json.dumps({
+                    "error": (
+                        f"Schedule conflict: {new_tech['name']} already has work order "
+                        f"{slot['woKey']} (engine #{slot['engineId']}) from hour "
+                        f"{s} to {s + d}. The requested slot is hour {wo_start}–{wo_end}. "
+                        f"Consider pushing this work order back or choosing another technician."
+                    )
+                })
+
+    desc = (
+        f"Reassign {wo['type']} WO {wo_key} (engine #{wo['engineId']}) "
+        f"from {cur.get('name', '?')} to {new_tech['name']} ({base})"
+    )
+    return json.dumps({
+        "__propose__": True,
+        "id": f"edit-{uuid.uuid4().hex[:12]}",
+        "description": desc,
+        "operation": {
+            "type": "reassign_work_order",
+            "entity_key": wo_key,
+            "fields": {
+                "new_tech_key": new_tech_key,
+                "old_tech_key": cur.get("id", ""),
+            },
+        },
+    })
+
+
+@tool
+async def find_eligible_technicians(wo_key: str) -> str:
+    """Return all technicians who can take a specific work order.
+
+    A technician is eligible if:
+      - Their homeBase matches the engine's aircraft base.
+      - They hold at least one certification that overlaps the engine's driverSubsystems.
+
+    Each result includes:
+      - key   : the technician _key to pass to propose_reassign_work_order (e.g. T003)
+      - name  : display name
+      - matchingCerts : which of their certifications cover the degrading subsystems
+      - schedule      : their currently-assigned work order slots (for conflict checking)
+
+    Call this FIRST whenever you need to reassign a work order — never guess a key.
+    """
+    now = int(time.time())
+    db = get_db()
+    rows = await asyncio.to_thread(
+        lambda: list(db.aql.execute(
+            Q_ELIGIBLE_TECHNICIANS_FOR_WO,
+            bind_vars={"wo_key": wo_key, "now": now},
+        ))
+    )
+    if not rows:
+        return json.dumps({
+            "eligible": [],
+            "note": (
+                "No eligible technicians found. Either no technicians are at the right base "
+                "or none have the required certifications. Consider pushing the work order back."
+            ),
+        })
+    return json.dumps({"eligible": rows, "note": f"{len(rows)} eligible technician(s) found"})
+
+
 _PLANNING_TOOLS = [
     query_ontology,
     read_graph,
     get_work_orders,
+    find_eligible_technicians,
+    check_technician_availability,
+    propose_reassign_work_order,
     propose_create_entity,
     propose_update_entity,
     propose_delete_entity,
@@ -679,21 +942,70 @@ _PLANNING_TOOLS = [
 
 _SYSTEM_PROMPT = """You are AeroFleet Planning Assistant, helping maintenance schedulers manage fleet operations.
 
-You can help with any entity in the fleet graph:
-- Work orders: create, reassign (delete+create performedBy), update deadlines/status, delete planner WOs
-- Personnel: update technician homeBase or name; add/remove certifications via certifiedFor edges
-- Aircraft: update base airport (rerouting), retire from fleet (propose_delete_entity with cascade)
-- Engines: add to fleet, update model, decommission (propose_delete_entity with cascade)
-- Parts: update stockLevel when parts arrive, update leadTimeDays when supplier changes
+## Work order reassignment — MANDATORY workflow
 
-Workflow for EVERY change:
-1. Call query_ontology() to confirm the operation and editable fields are allowed
-2. Call read_graph() to find exact entity keys and preview what will cascade on delete
-3. For deletions: always populate cascade_preview in propose_delete_entity so the user sees full impact
-4. Stage changes with propose_* tools — you NEVER write directly to the database
-5. Tell the user to confirm in the Pending Changes panel
+ALWAYS use propose_reassign_work_order for any WO reassignment. NEVER use
+propose_create_relationship / propose_delete_relationship for performedBy edges —
+those tools will return an error if you try.
 
-Always respond in English. For destructive operations, describe the cascade impact before proposing.
+The tool enforces three hard constraints automatically:
+  1. Same base — technician's homeBase must match the engine's aircraft base.
+  2. Certification — technician must hold at least one certification matching the
+     engine's driverSubsystems.
+  3. No schedule overlap — the technician's existing time slots must not collide
+     with the work order's scheduledHourStart / estimatedHours.
+
+### Batch reassignment rule (CRITICAL)
+When reassigning MORE THAN ONE work order, you MUST validate ALL of them BEFORE
+creating any proposals:
+  1. Call propose_reassign_work_order for EVERY target WO in sequence.
+  2. Collect all results — note which pass and which return errors.
+  3. Only AFTER checking every WO, report the full picture to the user
+     (which would succeed, which would fail and why).
+  4. Ask the user how to proceed before creating any proposals.
+  5. NEVER create a partial set of proposals while leaving other WOs unresolved.
+
+### Finding technicians — ALWAYS use find_eligible_technicians
+NEVER call read_graph() to search for technicians and then guess at their keys.
+NEVER pass a value from _id, _rev, or any numeric field as new_tech_key.
+
+The correct workflow for any reassignment:
+  1. Call find_eligible_technicians(wo_key) — returns a list with each technician's
+     exact `key` field (format T001…T010), name, matchingCerts, and current schedule.
+  2. Pick a candidate from that list based on schedule availability.
+  3. Optionally call check_technician_availability(key) to see their full slot detail.
+  4. Call propose_reassign_work_order(wo_key, key) using the `key` from step 1.
+
+### If validation fails
+- Relay the error verbatim — do NOT suggest the same technician again.
+- Call find_eligible_technicians again if you need to pick a different candidate.
+- If no eligible technician exists, offer to push the work order back (later deadline)
+  rather than forcing an invalid assignment.
+
+## Temporal edge model
+
+performedBy edges carry validFrom / validTo (Unix seconds). Reassignment expires the
+old edge and creates a new one — history is never deleted. The query layer filters on
+validTo to show only the current assignment. You can ask "who was assigned at time T"
+and the system will answer correctly.
+
+## Other operations
+
+- Schedule changes: propose_update_entity on workOrders with fields scheduledHourStart (working-hour
+  offset from today, e.g. 16 = day 2 at 08:00), estimatedHours, scheduledStart (ISO date), scheduledEnd (ISO date).
+  Always set all four together when changing a start time.
+- Status / deadline / description updates: propose_update_entity on workOrders
+- Personnel changes: propose_update_entity on technician; add/remove certifiedFor via propose_create/delete_relationship
+- Aircraft rerouting: propose_update_entity on aircraft (base field)
+- Retire aircraft / decommission engine: propose_delete_entity — always include cascade_preview
+- Parts stock updates: propose_update_entity on parts (stockLevel, leadTimeDays)
+
+Workflow for EVERY non-reassignment change:
+1. Call read_graph() to find exact entity keys and preview cascade impact
+2. Stage with propose_* tools — you NEVER write to the database directly
+3. Tell the user to confirm in the Pending Changes panel
+
+Always respond in English.
 
 ## Database Schema — use these EXACT collection names in AQL
 
@@ -702,7 +1014,7 @@ Vertex collections:
 - `engines`     — fields: _key, engineId, model, riskBucket, predictedRUL, entryIntoService, healthIndex, riskScore
 - `technicians` — fields: _key, name, homeBase
 - `parts`       — fields: _key, name, stockLevel, leadTimeDays
-- `workOrders`  — fields: _key, type, status, deadline, description, engineId, technicianId, generatedByPlanner, createdAt
+- `workOrders`  — fields: _key, type, status, deadline, description, engineId, technicianId, generatedByPlanner, createdAt, scheduledHourStart, scheduledStart, scheduledEnd, estimatedHours
 - `subsystems`  — fields: _key, name
 - `sensors`     — fields: _key, sensorId, type
 
@@ -895,7 +1207,7 @@ def _apply_single_edit(db, op: EditOperation) -> None:
         allowed = _EDITABLE_FIELDS.get(coll_name, set())
         safe = {k: v for k, v in (op.fields or {}).items() if k in allowed}
         if safe and op.entity_key:
-            db.collection(coll_name).update(op.entity_key, safe)
+            db.collection(coll_name).update({"_key": op.entity_key, **safe})
 
     elif op.type == "delete_entity":
         _cascade_delete(db, op.entity_type or "", op.entity_key or "")
@@ -903,15 +1215,45 @@ def _apply_single_edit(db, op: EditOperation) -> None:
     elif op.type == "create_relationship":
         if op.edge_type not in _MUTABLE_EDGE_TYPES:
             raise ValueError(f"Edge type '{op.edge_type}' is not mutable")
+        if op.edge_type == "performedBy":
+            raise ValueError(
+                "performedBy edges must be created via reassign_work_order, "
+                "not create_relationship — constraints are not validated here."
+            )
         db.collection(op.edge_type).insert({"_from": op.from_id, "_to": op.to_id})
 
     elif op.type == "delete_relationship":
         if op.edge_type not in _MUTABLE_EDGE_TYPES:
             raise ValueError(f"Edge type '{op.edge_type}' is not mutable")
+        if op.edge_type == "performedBy":
+            raise ValueError(
+                "performedBy edges must be managed via reassign_work_order, "
+                "not delete_relationship — history would be lost."
+            )
         db.aql.execute(
             Q_CASCADE_DELETE_RELATIONSHIP,
             bind_vars={"@coll": op.edge_type, "from": op.from_id, "to": op.to_id},
         )
+
+    elif op.type == "reassign_work_order":
+        wo_key       = op.entity_key or ""
+        fields       = op.fields or {}
+        new_tech_key = fields.get("new_tech_key", "")
+        if not wo_key or not new_tech_key:
+            raise ValueError("reassign_work_order requires entity_key (wo) and fields.new_tech_key")
+        now    = int(time.time())
+        wo_id  = f"workOrders/{wo_key}"
+        # Expire all currently-valid performedBy edges for this WO (preserves history).
+        db.aql.execute(Q_EXPIRE_PERFORMED_BY, bind_vars={"wo_id": wo_id, "now": now})
+        # Create new temporal edge to the new technician.
+        db.collection("performedBy").insert({
+            "_from":     wo_id,
+            "_to":       f"technicians/{new_tech_key}",
+            "validFrom": now,
+            "validTo":   _VALID_INF,
+        })
+        # Keep technicianId field on the document in sync.
+        db.collection("workOrders").update(wo_key, {"technicianId": new_tech_key})
 
     else:
         raise ValueError(f"Unknown operation type: {op.type}")
