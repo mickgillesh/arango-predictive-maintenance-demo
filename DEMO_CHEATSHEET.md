@@ -1,5 +1,7 @@
 # AeroFleet Demo Cheatsheet
 
+> Full narrative script with exact clicks and AQL: **DEMO_SCRIPT.md**
+
 ## Before the demo
 
 ### Technical setup
@@ -225,6 +227,23 @@ Technician [name] has moved to the JFK base.
 
 What would happen if I retired aircraft [tail number]?
 [Then] Go ahead and retire it.
+```
+
+### The headline demo prompt
+
+```
+Gina Moore has quit, can you reassign her work orders?
+```
+
+Gina Moore = **T008**, based at **SIN**. Her only eligible replacement is
+**Angie Henderson (T003)** — same base, overlapping certifications.
+The agent looks up Gina by name, finds her WOs, validates Angie against
+base + cert + schedule constraints, proposes all reassignments, and on
+confirm the schedules for both technicians are automatically repacked.
+
+Follow-up after confirming:
+```
+Show me Angie Henderson's updated schedule.
 ```
 
 ### Time-travel queries (bi-temporal history)
