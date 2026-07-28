@@ -1,12 +1,16 @@
 import type {
   FleetResponse, EngineDetail, ReadingsResponse,
-  ImpactResponse, AskResponse, PlannedWorkOrder, ProposeEdit,
+  ImpactResponse, AskResponse, PlannedWorkOrder, ProposeEdit, Technician,
 } from './types'
 
 const BASE = '/api'
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`)
+  if (r.status === 401) {
+    window.location.href = '/auth/login'
+    return new Promise(() => {}) // redirect in progress
+  }
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
   return r.json() as Promise<T>
 }
@@ -75,6 +79,8 @@ export const api = {
       `${BASE}/plan/chat`, 'POST', onEvent, signal,
       JSON.stringify({ message, session_id: sessionId }),
     ),
+
+  planTechnicians: () => get<{ technicians: Technician[] }>('/plan/technicians'),
 
   planApplyEdits: (edits: ProposeEdit[]): Promise<{ applied: number; errors: unknown[] }> =>
     fetch(`${BASE}/plan/apply-edits`, {

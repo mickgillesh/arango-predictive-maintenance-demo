@@ -29,7 +29,7 @@ VERTEX_COLLECTIONS = [
 ]
 EDGE_COLLECTIONS = [
     "installedOn", "partOf", "monitors", "requiredBy",
-    "certifiedFor", "maintains", "performedBy", "consumed",
+    "certifiedFor", "maintains", "performedBy", "consumed", "dependsOn",
 ]
 GRAPH_NAME = "fleetGraph"
 
@@ -74,6 +74,11 @@ _GRAPH_EDGE_DEFS = [
         "edge_collection": "consumed",
         "from_vertex_collections": ["workOrders"],
         "to_vertex_collections": ["parts"],
+    },
+    {
+        "edge_collection": "dependsOn",
+        "from_vertex_collections": ["workOrders"],
+        "to_vertex_collections": ["workOrders"],
     },
 ]
 
@@ -548,6 +553,19 @@ def _apply_ontology(db) -> None:
             "toType": "part",
             "allowedOps": ["create", "delete"],
             "constraints": [],
+        },
+        {
+            "_key": "dependsOn",
+            "label": "Maintenance WO depends on procurement WO",
+            "edgeCollection": "dependsOn",
+            "fromType": "workOrder",
+            "toType": "workOrder",
+            "allowedOps": ["read"],
+            "constraints": [
+                "Created automatically during plan generation when a maintenance WO is "
+                "blocked by missing parts. Direction: maintenance WO → procurement WO.",
+                "Read-only via agent — managed by the planner, not editable directly.",
+            ],
         },
         {
             "_key": "partOf",

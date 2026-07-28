@@ -110,6 +110,8 @@ export interface PlannedWorkOrder {
   scheduledEnd?: string | null
   technician: { id: string; name: string; homeBase: string }
   parts: Part[]
+  dependsOn?: { key: string; type: WOType; status: WOStatus } | null
+  blockedByThis?: { key: string; type: WOType; status: WOStatus }[]
 }
 
 export interface ScheduledTask {
@@ -136,6 +138,7 @@ export interface PlanSummary {
   procurementOrders: number
   enginesPlanned: number
   reasoningSummary?: string
+  reasoningSteps?: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +168,7 @@ export interface ProposeEdit {
   operation: ProposeEditOperation
 }
 
-export type PlannerChatRole = 'user' | 'assistant' | 'thinking' | 'tool_call'
+export type PlannerChatRole = 'user' | 'assistant' | 'thinking' | 'tool_call' | 'system'
 
 export interface PlannerChatMessage {
   id: string

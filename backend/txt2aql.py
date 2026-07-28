@@ -9,7 +9,7 @@ Required env:
   OPENAI_API_KEY  — OpenAI API key
 
 Optional env:
-  OPENAI_MODEL    — model name (default: gpt-4o)
+  OPENAI_MODEL    — model name (default: gpt-5.6-luna)
 
 Public interface (unchanged from previous txt2aql HTTP implementation):
   async def ask(question: str) -> dict   # {answer, aql, raw, error}
@@ -72,7 +72,7 @@ def _get_chain() -> ArangoGraphQAChain | None:
         db = get_db()
         graph = ArangoGraph(db=db)
         llm = ChatOpenAI(
-            model=os.environ.get("OPENAI_MODEL", "gpt-4o"),
+            model=os.environ.get("OPENAI_MODEL", "gpt-5.6-luna"),
             temperature=0,
             api_key=api_key,
         )

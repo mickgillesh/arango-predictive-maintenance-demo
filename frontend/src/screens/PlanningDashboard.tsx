@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import type {
   PlannedWorkOrder, PlanSummary, RiskBucket, WOType, WOStatus,
-  ProposeEdit, PlannerChatMessage, TechnicianTimeline, ScheduledTask,
+  ProposeEdit, PlannerChatMessage, TechnicianTimeline, ScheduledTask, Technician,
 } from '../types'
 
 interface LogLine { text: string; cls: string }
@@ -99,6 +99,37 @@ function WorkOrderDrawer({ wo, onClose }: { wo: PlannedWorkOrder; onClose: () =>
             {wo.deadline}
           </span>
         </div>
+
+        {wo.dependsOn && (
+          <>
+            <div className="wo-drawer-section-title">Depends On</div>
+            <div className="wo-drawer-part-row">
+              <span className="wo-part-blocking">⏳</span>
+              <div className="wo-drawer-part-info">
+                <div className="wo-drawer-part-name">{wo.dependsOn.key}</div>
+                <div className="wo-drawer-part-meta">
+                  {wo.dependsOn.type} · <StatusBadge status={wo.dependsOn.status} />
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+        {wo.blockedByThis && wo.blockedByThis.length > 0 && (
+          <>
+            <div className="wo-drawer-section-title">Blocks</div>
+            {wo.blockedByThis.map(dep => (
+              <div key={dep.key} className="wo-drawer-part-row">
+                <span style={{ fontSize: '1rem' }}>🔒</span>
+                <div className="wo-drawer-part-info">
+                  <div className="wo-drawer-part-name">{dep.key}</div>
+                  <div className="wo-drawer-part-meta">
+                    {dep.type} · <StatusBadge status={dep.status} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
 
         {wo.parts?.length > 0 && (
           <>
@@ -207,13 +238,16 @@ function PlanGantt({
 }
 
 export function PlanningDashboard() {
-  const [running, setRunning]       = useState(false)
-  const [logLines, setLogLines]     = useState<LogLine[]>([])
-  const [workOrders, setWorkOrders] = useState<PlannedWorkOrder[]>([])
-  const [summary, setSummary]       = useState<PlanSummary | null>(null)
-  const [timelines, setTimelines]   = useState<TechnicianTimeline[]>([])
-  const [resetting, setResetting]   = useState(false)
-  const [selectedWO, setSelectedWO] = useState<PlannedWorkOrder | null>(null)
+  const [running, setRunning]           = useState(false)
+  const [logLines, setLogLines]         = useState<LogLine[]>([])
+  const [workOrders, setWorkOrders]     = useState<PlannedWorkOrder[]>([])
+  const [summary, setSummary]           = useState<PlanSummary | null>(null)
+  const [timelines, setTimelines]       = useState<TechnicianTimeline[]>([])
+  const [resetting, setResetting]       = useState(false)
+  const [selectedWO, setSelectedWO]     = useState<PlannedWorkOrder | null>(null)
+  const [technicians, setTechnicians]   = useState<Technician[]>([])
+  const [expandedTechs, setExpandedTechs] = useState<Set<string>>(new Set())
+  const [reasoningOpen, setReasoningOpen] = useState(false)
   const abortRef  = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -231,6 +265,13 @@ export function PlanningDashboard() {
     api.planWorkOrders()
       .then(r => setWorkOrders(r.workOrders))
       .catch(() => { /* no plan yet */ })
+  }, [])
+
+  // Technician roster — always available regardless of plan state
+  useEffect(() => {
+    api.planTechnicians()
+      .then(r => setTechnicians(r.technicians))
+      .catch(() => { /* non-fatal */ })
   }, [])
 
   // Derive timeline from work orders whenever they change (covers both initial
@@ -274,6 +315,28 @@ export function PlanningDashboard() {
   const addLog = (text: string, cls = '') =>
     setLogLines(prev => [...prev, { text, cls }])
 
+  async function refreshData() {
+    const [wosResult, techsResult] = await Promise.allSettled([
+      api.planWorkOrders(),
+      api.planTechnicians(),
+    ])
+    if (wosResult.status === 'fulfilled') {
+      const wos = wosResult.value.workOrders
+      setWorkOrders(wos)
+      // Keep summary KPI counts in sync without losing reasoningSteps / reasoningSummary
+      setSummary(prev => prev == null ? null : {
+        ...prev,
+        totalWorkOrders: wos.length,
+        maintenanceOrders: wos.filter(wo => wo.type === 'maintenance').length,
+        procurementOrders: wos.filter(wo => wo.type === 'procurement').length,
+        enginesPlanned: new Set(wos.map(wo => wo.engineId)).size,
+      })
+    }
+    if (techsResult.status === 'fulfilled') {
+      setTechnicians(techsResult.value.technicians)
+    }
+  }
+
   async function handleRun() {
     if (running) return
     abortRef.current = new AbortController()
@@ -314,11 +377,8 @@ export function PlanningDashboard() {
       }
     } finally {
       setRunning(false)
-      // Refresh from DB to get fully-joined work orders (with technician, parts, riskBucket)
-      try {
-        const refreshed = await api.planWorkOrders()
-        if (refreshed.workOrders.length > 0) setWorkOrders(refreshed.workOrders)
-      } catch { /* non-fatal */ }
+      // Refresh from DB to get fully-joined data (technician, parts, riskBucket)
+      await refreshData().catch(() => { /* non-fatal */ })
     }
   }
 
@@ -376,14 +436,38 @@ export function PlanningDashboard() {
     setPendingEdits([])
     try {
       const res = await api.planApplyEdits(edits)
-      const refreshed = await api.planWorkOrders()
-      setWorkOrders(refreshed.workOrders)
+      await refreshData()
+
+      const appliedDescriptions = edits.map(e => `• ${e.description}`).join('\n')
+      const errorNote = (res.errors as unknown[]).length
+        ? ` (${(res.errors as unknown[]).length} error(s))`
+        : ''
+
+      // Show a system notification in the chat
       setChatMessages(prev => [...prev, {
-        id: crypto.randomUUID(), role: 'assistant',
-        text: `Applied ${res.applied} change${res.applied !== 1 ? 's' : ''}.${
-          (res.errors as unknown[]).length ? ` (${(res.errors as unknown[]).length} errors)` : ''
-        }`,
+        id: crypto.randomUUID(),
+        role: 'system' as PlannerChatMessage['role'],
+        text: `${res.applied} change${res.applied !== 1 ? 's' : ''} applied${errorNote}:\n${appliedDescriptions}`,
       }])
+
+      // Notify the agent automatically so it can respond without user re-prompting
+      if (res.applied > 0 && !chatRunning) {
+        const systemMsg = `[Changes confirmed and applied]\n${appliedDescriptions}\nPlease acknowledge and let me know if there's anything else to address.`
+        setChatRunning(true)
+        chatAbortRef.current = new AbortController()
+        try {
+          await api.planChat(systemMsg, sessionId, (event, data) => {
+            const d = data as Record<string, unknown>
+            if (event === 'answer') {
+              setChatMessages(prev => [...prev, {
+                id: crypto.randomUUID(), role: 'assistant', text: d.text as string
+              }])
+            }
+          }, chatAbortRef.current.signal)
+        } finally {
+          setChatRunning(false)
+        }
+      }
     } catch {
       setChatMessages(prev => [...prev, {
         id: crypto.randomUUID(), role: 'assistant', text: 'Failed to apply changes.'
@@ -405,6 +489,14 @@ export function PlanningDashboard() {
     } finally {
       setResetting(false)
     }
+  }
+
+  function toggleTech(id: string) {
+    setExpandedTechs(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   // Index for Gantt bar → WO lookup
@@ -450,6 +542,33 @@ export function PlanningDashboard() {
         </div>
       </div>
 
+      {/* Technician roster */}
+      {technicians.length > 0 && (
+        <div className="section">
+          <div className="card">
+            <h2>Available Technicians</h2>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Base</th><th>Certifications</th></tr>
+                </thead>
+                <tbody>
+                  {technicians.map(t => (
+                    <tr key={t.id}>
+                      <td>{t.name}</td>
+                      <td><span className="tag">{t.homeBase}</span></td>
+                      <td style={{ color: 'var(--text2)', fontSize: '0.85rem' }}>
+                        {(t.certifications ?? []).join(', ') || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live log */}
       {(logLines.length > 0 || running) && (
         <div className="section">
@@ -490,6 +609,31 @@ export function PlanningDashboard() {
         </div>
       )}
 
+      {/* AI Reasoning — collapsible, shown after plan runs */}
+      {summary?.reasoningSteps && summary.reasoningSteps.length > 0 && (
+        <div className="section">
+          <div className="card">
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
+              onClick={() => setReasoningOpen(o => !o)}
+            >
+              <span style={{ fontSize: '0.75rem', color: 'var(--text2)', userSelect: 'none' }}>
+                {reasoningOpen ? '▼' : '▶'}
+              </span>
+              <h2 style={{ margin: 0 }}>AI Reasoning</h2>
+              <span style={{ color: 'var(--text2)', fontSize: '0.85rem' }}>
+                {summary.reasoningSteps.length} step{summary.reasoningSteps.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            {reasoningOpen && (
+              <ol style={{ marginTop: 12, paddingLeft: 20, color: 'var(--text2)', fontSize: '0.9rem', lineHeight: 1.6 }}>
+                {summary.reasoningSteps.map((step, i) => <li key={i}>{step}</li>)}
+              </ol>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Pre-populated results when no summary yet */}
       {!summary && workOrders.length > 0 && !running && (
         <div style={{ marginBottom: 16, color: 'var(--text2)', fontSize: '0.88rem' }}>
@@ -497,60 +641,84 @@ export function PlanningDashboard() {
         </div>
       )}
 
-      {/* Results grouped by technician */}
+      {/* Results grouped by technician — collapsible */}
       {workOrders.length > 0 && (
         <div className="section">
-          {Object.values(byTech).map(group => (
-            <div key={group.name} className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <h3>{group.name}</h3>
-                <span className="tag">{group.homeBase}</span>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 }}>
+            <button className="btn-outline btn-sm" onClick={() => setExpandedTechs(new Set(Object.keys(byTech)))}>
+              Expand all
+            </button>
+            <button className="btn-outline btn-sm" onClick={() => setExpandedTechs(new Set())}>
+              Collapse all
+            </button>
+          </div>
+          {Object.entries(byTech).map(([techId, group]) => {
+            const expanded = expandedTechs.has(techId)
+            return (
+              <div key={techId} className="card" style={{ marginBottom: 16 }}>
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: expanded ? 12 : 0, cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => toggleTech(techId)}
+                >
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text2)' }}>
+                    {expanded ? '▼' : '▶'}
+                  </span>
+                  <h3>{group.name}</h3>
+                  <span className="tag">{group.homeBase}</span>
+                  {!expanded && (
+                    <span style={{ marginLeft: 'auto', color: 'var(--text2)', fontSize: '0.85rem' }}>
+                      {group.wos.length} work order{group.wos.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                {expanded && (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Engine</th>
+                          <th>Type</th>
+                          <th>Status</th>
+                          <th>Risk</th>
+                          <th>Sched. Start</th>
+                          <th>Est. Hours</th>
+                          <th>Deadline</th>
+                          <th style={{ maxWidth: 300 }}>Description</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.wos.map(wo => (
+                          <tr key={wo._key} className="wo-row-clickable" onClick={() => setSelectedWO(wo)}>
+                            <td>
+                              <Link to={`/engines/${wo.engineId}`} onClick={e => e.stopPropagation()}>#{wo.engineId}</Link>
+                            </td>
+                            <td><TypeBadge type={wo.type} /></td>
+                            <td><StatusBadge status={wo.status} /></td>
+                            <td>
+                              <RiskDot bucket={wo.riskBucket} />
+                              {wo.riskBucket}
+                            </td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text2)' }}>
+                              {wo.scheduledStart ?? '—'}
+                            </td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {wo.estimatedHours != null ? `${wo.estimatedHours}h` : '—'}
+                            </td>
+                            <td style={{ color: deadlineColor(wo.deadline), fontVariantNumeric: 'tabular-nums' }}>
+                              {wo.deadline}
+                            </td>
+                            <td style={{ color: 'var(--text2)', fontSize: '0.85rem' }}>
+                              {wo.description}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Engine</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>Risk</th>
-                      <th>Sched. Start</th>
-                      <th>Est. Hours</th>
-                      <th>Deadline</th>
-                      <th style={{ maxWidth: 300 }}>Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.wos.map(wo => (
-                      <tr key={wo._key} className="wo-row-clickable" onClick={() => setSelectedWO(wo)}>
-                        <td>
-                          <Link to={`/engines/${wo.engineId}`} onClick={e => e.stopPropagation()}>#{wo.engineId}</Link>
-                        </td>
-                        <td><TypeBadge type={wo.type} /></td>
-                        <td><StatusBadge status={wo.status} /></td>
-                        <td>
-                          <RiskDot bucket={wo.riskBucket} />
-                          {wo.riskBucket}
-                        </td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text2)' }}>
-                          {wo.scheduledStart ?? '—'}
-                        </td>
-                        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                          {wo.estimatedHours != null ? `${wo.estimatedHours}h` : '—'}
-                        </td>
-                        <td style={{ color: deadlineColor(wo.deadline), fontVariantNumeric: 'tabular-nums' }}>
-                          {wo.deadline}
-                        </td>
-                        <td style={{ color: 'var(--text2)', fontSize: '0.85rem' }}>
-                          {wo.description}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -589,6 +757,13 @@ export function PlanningDashboard() {
                     <div key={m.id} className="plan-msg plan-msg-tool_call">
                       <span style={{ color: 'var(--accent)' }}>{m.tool}</span>
                       {m.text ? `(${m.text.slice(0, 120)}${m.text.length > 120 ? '…' : ''})` : '()'}
+                    </div>
+                  )
+                }
+                if (m.role === 'system') {
+                  return (
+                    <div key={m.id} className="plan-msg plan-msg-system">
+                      {m.text}
                     </div>
                   )
                 }
