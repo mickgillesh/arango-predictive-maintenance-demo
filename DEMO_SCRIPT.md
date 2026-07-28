@@ -76,7 +76,7 @@ Point to the driver subsystem callout.
 
 ---
 
-## Act 3 — Ask (3 min)
+## Act 3 — Ask (2 min)
 ### Screen: Impact Explorer `/engines/:id/impact`
 
 > "This is a single AQL graph traversal. From the engine we walk four edge
@@ -94,23 +94,10 @@ Point to the technicians panel:
 > specific base*. The graph knows not just who's qualified globally, but who's
 > reachable."
 
-Open the chat panel. Type:
+> "One query, four edge collections, no joins. Let's now see what it looks like
+> to act on this — generate a plan for the whole fleet."
 
-```
-Which technicians at this base are certified for HPC maintenance?
-```
-
-> "Natural language question, translated to AQL by the platform's txt2aql service,
-> executed live against the same graph. No hardcoded schema — it introspects the
-> database at runtime."
-
-Try a second question:
-
-```
-How many engines across the fleet share this aircraft's base and have a predicted RUL under 50 cycles?
-```
-
-> "One question, fleet-wide graph query, real answer."
+**Click "Maintenance Planner →".**
 
 ---
 
