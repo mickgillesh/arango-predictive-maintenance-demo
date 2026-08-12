@@ -25,4 +25,4 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 # Cloud Run injects PORT (default 8080); smoke test also uses 8080
 ENV PORT=8080
 EXPOSE 8080
-CMD ["uv", "run", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uv", "run", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips=*"]
