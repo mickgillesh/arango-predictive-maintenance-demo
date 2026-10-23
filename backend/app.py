@@ -60,10 +60,24 @@ def _maybe_score() -> None:
         log.warning("Startup scoring skipped: %s", exc)
 
 
+_DISABLE_AUTH = os.environ.get("DISABLE_AUTH", "").lower() in ("1", "true", "yes")
+if _DISABLE_AUTH:
+    log.warning("DISABLE_AUTH is set — auth guard disabled (dev mode only, never use in prod)")
+
+_DEV_USER = {"email": "dev@arangodb.com", "name": "Dev User", "picture": ""}
+
+
 class _AuthGuard(BaseHTTPMiddleware):
-    """Reject unauthenticated requests; skip /auth/* paths."""
+    """Reject unauthenticated requests; skip /auth/* paths.
+
+    Set DISABLE_AUTH=true in .env.local to bypass for local development.
+    """
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        if _DISABLE_AUTH:
+            if not request.session.get("user"):
+                request.session["user"] = _DEV_USER
+            return await call_next(request)
         path = request.url.path
         if path.startswith("/auth/"):
             return await call_next(request)

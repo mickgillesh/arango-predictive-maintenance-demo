@@ -4,6 +4,7 @@ import { api } from '../api'
 import type {
   PlannedWorkOrder, PlanSummary, RiskBucket, WOType, WOStatus,
   ProposeEdit, PlannerChatMessage, TechnicianTimeline, ScheduledTask, Technician,
+  TechnicalDoc, TechDocsResult,
 } from '../types'
 
 interface LogLine { text: string; cls: string }
@@ -57,6 +58,115 @@ function StatusBadge({ status }: { status: WOStatus }) {
 function RiskDot({ bucket }: { bucket: RiskBucket }) {
   const color = bucket === 'critical' ? 'var(--critical)' : bucket === 'warning' ? 'var(--warning)' : 'var(--healthy)'
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: color, marginRight: 6 }} />
+}
+
+function TechDocBadge({ type }: { type: 'AD' | 'SB' }) {
+  return <span className={`tech-doc-badge tech-doc-badge-${type.toLowerCase()}`}>{type}</span>
+}
+
+function TechDocsPanel({ woKey }: { woKey: string }) {
+  const [result, setResult]   = useState<TechDocsResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen]       = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  async function load() {
+    if (result) { setOpen(o => !o); return }
+    setOpen(true)
+    setLoading(true)
+    try {
+      const r = await api.woTechnicalDocs(woKey)
+      setResult(r)
+    } catch {
+      setResult({ docs: [], configured: true, error: 'fetch_failed' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggleDoc(docNumber: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(docNumber) ? next.delete(docNumber) : next.add(docNumber)
+      return next
+    })
+  }
+
+  return (
+    <div className="tech-docs-section">
+      <button className="tech-docs-toggle" onClick={load}>
+        {loading
+          ? <><span className="spinner" style={{ width: 11, height: 11 }} /> Loading…</>
+          : <>{open ? '▼' : '▶'} Technical Requirements</>}
+      </button>
+
+      {open && !loading && result && (
+        <div className="tech-docs-body">
+          {!result.configured && (
+            <div className="tech-docs-unconfigured">
+              Technical document service not configured.
+              Set <code>RETRIEVER_URL</code> and <code>RETRIEVER_AUTH</code> to enable.
+            </div>
+          )}
+          {result.configured && result.docs.length === 0 && (
+            <div className="tech-docs-empty">
+              No relevant ADs or SBs found for this engine/subsystem.
+              {result.error ? ` (${result.error})` : ''}
+            </div>
+          )}
+          {result.docs.map((doc: TechnicalDoc) => {
+            const isExpanded = expanded.has(doc.docNumber)
+            return (
+              <div key={doc.docNumber} className="tech-doc-card">
+                <div className="tech-doc-header" onClick={() => toggleDoc(doc.docNumber)}>
+                  <div className="tech-doc-meta">
+                    <TechDocBadge type={doc.docType} />
+                    <span className="tech-doc-number">{doc.docNumber}</span>
+                    <span className="tech-doc-issuer">{doc.issuer}</span>
+                  </div>
+                  <span className="tech-doc-expand">{isExpanded ? '▲' : '▼'}</span>
+                </div>
+                <div className="tech-doc-title">{doc.title}</div>
+                {doc.affectedSubsystems?.length > 0 && (
+                  <div className="tech-doc-tags">
+                    {doc.affectedSubsystems.map(s => (
+                      <span key={s} className="tag">{s}</span>
+                    ))}
+                  </div>
+                )}
+                {doc.complianceInterval && (
+                  <div className="tech-doc-interval">
+                    Interval: {doc.complianceInterval}
+                  </div>
+                )}
+                {isExpanded && (
+                  <>
+                    {doc.mandatoryActions && (
+                      <div className="tech-doc-actions">
+                        <div className="tech-doc-actions-label">
+                          {doc.docType === 'SB' ? 'Recommended Actions' : 'Mandatory Actions'}
+                        </div>
+                        <div className="tech-doc-actions-text">{doc.mandatoryActions}</div>
+                      </div>
+                    )}
+                    {doc.content && (
+                      <div className="tech-doc-content">{doc.content}{doc.content.length >= 400 ? '…' : ''}</div>
+                    )}
+                  </>
+                )}
+              </div>
+            )
+          })}
+          {result.configured && result.docs.length > 0 && result.engineModel && (
+            <div className="tech-docs-context">
+              Searched: {result.engineModel}
+              {result.subsystems?.length ? ` · ${result.subsystems.join(', ')}` : ''}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function WorkOrderDrawer({ wo, onClose }: { wo: PlannedWorkOrder; onClose: () => void }) {
@@ -152,6 +262,8 @@ function WorkOrderDrawer({ wo, onClose }: { wo: PlannedWorkOrder; onClose: () =>
             ))}
           </>
         )}
+
+        {wo.type === 'maintenance' && <TechDocsPanel woKey={wo._key} />}
       </div>
     </>
   )

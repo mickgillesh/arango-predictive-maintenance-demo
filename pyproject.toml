@@ -12,6 +12,7 @@ dependencies = [
     "faker>=25.0",
     "httpx>=0.27",
     "langchain-arangodb>=0.2",
+    "openai>=1.0",
     "langchain-openai>=0.2",
     "langgraph>=0.2",
     "authlib>=1.3",

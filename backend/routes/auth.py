@@ -1,8 +1,11 @@
+import logging
 import os
 
 from authlib.integrations.starlette_client import OAuth
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 

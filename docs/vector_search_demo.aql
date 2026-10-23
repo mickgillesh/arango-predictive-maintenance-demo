@@ -1,0 +1,106 @@
+-- ============================================================================
+-- AeroFleet — Hybrid RAG Demo Queries
+-- ============================================================================
+-- Prerequisites:
+--   make load && make score && make embed
+--
+-- To run these queries you need a query embedding for your search phrase.
+-- Generate one externally (e.g. with a small Python snippet) and paste it
+-- as the @queryVec bind variable in the ArangoDB query editor.
+--
+-- Quick embedding helper (run in your terminal):
+--   python3 -c "
+--   from openai import OpenAI
+--   import json
+--   phrase = 'high pressure compressor temperature anomaly'
+--   vec = OpenAI().embeddings.create(model='text-embedding-3-small', input=[phrase]).data[0].embedding
+--   print(json.dumps(vec))
+--   "
+--
+-- Copy the printed JSON array, then set it as the @queryVec bind var below.
+-- ============================================================================
+
+
+-- ----------------------------------------------------------------------------
+-- Query 1: Semantic engine search
+-- Finds engines whose technician notes are semantically similar to @queryVec.
+-- Requires: vector index on engines.notesEmbedding (created by make embed).
+-- Note: APPROX_NEAR_COSINE requires ArangoDB 3.12+ with a vector index.
+--       If unavailable, substitute COSINE_SIMILARITY for an exact (unindexed) scan.
+-- ----------------------------------------------------------------------------
+
+FOR engine IN engines
+  LET similarity = APPROX_NEAR_COSINE(engine.notesEmbedding, @queryVec)
+  SORT similarity DESC
+  LIMIT 5
+  RETURN {
+    engineId:    engine._key,
+    model:       engine.model,
+    riskBucket:  engine.riskBucket,
+    healthIndex: engine.healthIndex,
+    similarity:  similarity,
+    notes:       engine.technicianNotes
+  }
+
+
+-- ----------------------------------------------------------------------------
+-- Query 2: Hybrid RAG — semantic search + graph expansion
+-- 1. Semantic search finds the top-5 most relevant engines.
+-- 2. Graph traversal expands each engine to its aircraft and technicians.
+-- This demonstrates ArangoDB's unique strength: semantic retrieval combined
+-- with knowledge-graph expansion in a single AQL query.
+-- ----------------------------------------------------------------------------
+
+LET top_engines = (
+  FOR engine IN engines
+    LET similarity = APPROX_NEAR_COSINE(engine.notesEmbedding, @queryVec)
+    SORT similarity DESC
+    LIMIT 5
+    RETURN MERGE(engine, { similarity })
+)
+
+FOR engine IN top_engines
+  -- Expand to the aircraft this engine is installed on
+  LET aircraft = (
+    FOR a IN 1..1 OUTBOUND engine installedOn
+      RETURN { tailNumber: a.tailNumber, base: a.base }
+  )
+
+  -- Expand via work orders to technicians who have worked on this engine
+  LET technicians = (
+    FOR wo IN 1..1 OUTBOUND engine maintains
+      FOR tech IN 1..1 OUTBOUND wo performedBy
+        RETURN DISTINCT { name: tech.name, homeBase: tech.homeBase, certifications: tech.certifications }
+  )
+
+  RETURN {
+    engineId:          engine._key,
+    model:             engine.model,
+    riskBucket:        engine.riskBucket,
+    healthIndex:       engine.healthIndex,
+    similarity:        engine.similarity,
+    notes:             engine.technicianNotes,
+    installedOn:       aircraft,
+    relatedTechnicians: technicians
+  }
+
+
+-- ----------------------------------------------------------------------------
+-- Query 3: Exact cosine similarity fallback (no vector index required)
+-- Use this if the vector index is unavailable or for small result sets.
+-- COSINE_SIMILARITY performs a full collection scan — slower for 100+ engines
+-- but useful for debugging or verifying embedding quality.
+-- ----------------------------------------------------------------------------
+
+FOR engine IN engines
+  FILTER HAS(engine, 'notesEmbedding')
+  LET similarity = COSINE_SIMILARITY(engine.notesEmbedding, @queryVec)
+  SORT similarity DESC
+  LIMIT 5
+  RETURN {
+    engineId:   engine._key,
+    model:      engine.model,
+    riskBucket: engine.riskBucket,
+    similarity: similarity,
+    notes:      engine.technicianNotes
+  }

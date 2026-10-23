@@ -1,4 +1,4 @@
-.PHONY: check test load score dev image smoke reset deploy
+.PHONY: check test load score embed dev image smoke reset deploy
 
 GCP_PROJECT ?= $(shell gcloud config get-value project 2>/dev/null)
 GCP_REGION  ?= europe-west2
@@ -21,6 +21,9 @@ dev:
 	uv run uvicorn backend.app:app --reload &
 	cd frontend && npm run dev
 
+embed:
+	uv run python pipeline/embed_runner.py
+
 reset: load score
 
 image:
@@ -42,4 +45,4 @@ deploy:
 	  --project $(GCP_PROJECT) \
 	  --allow-unauthenticated \
 	  --memory 1Gi \
-	  --set-env-vars "ARANGO_URL=$(ARANGO_URL),ARANGO_DB=$(ARANGO_DB),ARANGO_USER=$(ARANGO_USER),ARANGO_PASSWORD=$(ARANGO_PASSWORD),OPENAI_API_KEY=$(OPENAI_API_KEY),GOOGLE_CLIENT_ID=$(GOOGLE_CLIENT_ID),GOOGLE_CLIENT_SECRET=$(GOOGLE_CLIENT_SECRET),GOOGLE_REDIRECT_URI=$(GOOGLE_REDIRECT_URI),SESSION_SECRET=$(SESSION_SECRET)"
+	  --set-env-vars "ARANGO_URL=$(ARANGO_URL),ARANGO_DB=$(ARANGO_DB),ARANGO_USER=$(ARANGO_USER),ARANGO_PASSWORD=$(ARANGO_PASSWORD),OPENAI_API_KEY=$(OPENAI_API_KEY),GOOGLE_CLIENT_ID=$(GOOGLE_CLIENT_ID),GOOGLE_CLIENT_SECRET=$(GOOGLE_CLIENT_SECRET),GOOGLE_REDIRECT_URI=$(GOOGLE_REDIRECT_URI),SESSION_SECRET=$(SESSION_SECRET),RETRIEVER_URL=$(RETRIEVER_URL),RETRIEVER_TOOL_ID=$(RETRIEVER_TOOL_ID)"
