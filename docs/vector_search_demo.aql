@@ -67,8 +67,9 @@ FOR engine IN top_engines
   )
 
   -- Expand via work orders to technicians who have worked on this engine
+  -- maintains edges: workOrders → engines, so INBOUND from engine to reach workOrders
   LET technicians = (
-    FOR wo IN 1..1 OUTBOUND engine maintains
+    FOR wo IN 1..1 INBOUND engine maintains
       FOR tech IN 1..1 OUTBOUND wo performedBy
         RETURN DISTINCT { name: tech.name, homeBase: tech.homeBase, certifications: tech.certifications }
   )
