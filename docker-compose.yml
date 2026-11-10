@@ -1,0 +1,31 @@
+services:
+  # Main application — FastAPI backend + built React frontend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file: .env.local
+    environment:
+      # Tell the backend to delegate scoring to the scorer sidecar
+      SCORER_URL: http://scorer:8001
+    depends_on:
+      scorer:
+        condition: service_healthy
+
+  # Scorer sidecar — health prediction model running next to the database
+  # Represents: a custom ML container deployed alongside ArangoDB in BYOC
+  scorer:
+    build:
+      context: .
+      dockerfile: scorer_service/Dockerfile
+    ports:
+      - "8001:8001"
+    env_file: .env.local
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

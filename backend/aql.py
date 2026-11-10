@@ -209,11 +209,51 @@ FOR wo IN workOrders
         blocking: p.stockLevel == 0
       }
   )
+  LET dependsOnWO = FIRST(
+    FOR dep IN 1..1 OUTBOUND wo dependsOn
+      RETURN { key: dep._key, type: dep.type, status: dep.status }
+  )
+  LET blockedByThis = (
+    FOR dep IN 1..1 INBOUND wo dependsOn
+      RETURN { key: dep._key, type: dep.type, status: dep.status }
+  )
   SORT wo.deadline ASC
   RETURN MERGE(wo, {
-    engine:     { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
-    technician: { id: tech._key, name: tech.name, homeBase: tech.homeBase },
-    parts: parts
+    engine:       { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
+    technician:   { id: tech._key, name: tech.name, homeBase: tech.homeBase },
+    parts:        parts,
+    dependsOn:    dependsOnWO,
+    blockedByThis: blockedByThis
+  })
+"""
+
+# Same query without dependsOn traversal — used when the collection doesn't exist yet
+# (test DBs and databases that haven't had `make load` run since the edge was added).
+Q_PLAN_WORK_ORDERS_NO_DEPENDS = """
+FOR wo IN workOrders
+  FILTER wo.generatedByPlanner == true
+  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
+  LET tech = FIRST(
+    FOR t, e IN 1..1 OUTBOUND wo performedBy
+      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
+      SORT e.validFrom DESC
+      RETURN t
+  )
+  LET parts = (
+    FOR p IN 1..1 OUTBOUND wo consumed
+      RETURN {
+        id: p._key, name: p.name, subsystemType: p.subsystemType,
+        stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
+        blocking: p.stockLevel == 0
+      }
+  )
+  SORT wo.deadline ASC
+  RETURN MERGE(wo, {
+    engine:       { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
+    technician:   { id: tech._key, name: tech.name, homeBase: tech.homeBase },
+    parts:        parts,
+    dependsOn:    null,
+    blockedByThis: []
   })
 """
 
@@ -249,6 +289,9 @@ Q_PLAN_DELETE_PERFORMED = (
 )
 Q_PLAN_DELETE_CONSUMED = (
     "FOR e IN consumed    FILTER e._from IN @ids REMOVE e IN consumed"
+)
+Q_PLAN_DELETE_DEPENDS_ON = (
+    "FOR e IN dependsOn FILTER e._from IN @ids REMOVE e IN dependsOn"
 )
 Q_PLAN_DELETE_WOS = (
     "FOR wo IN workOrders FILTER wo.generatedByPlanner == true REMOVE wo IN workOrders"
@@ -318,22 +361,31 @@ Q_ELIGIBLE_TECHNICIANS_FOR_WO = """
 LET wo  = DOCUMENT(CONCAT('workOrders/', @wo_key))
 LET eng = DOCUMENT(CONCAT('engines/', wo.engineId))
 LET ac  = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
-FOR t IN technicians
-  FILTER t.homeBase == ac.base
-  LET matching = INTERSECTION(t.certifications, eng.driverSubsystems)
-  FILTER LENGTH(matching) > 0
-  LET wos = (
-    FOR w, e IN 1..1 INBOUND t performedBy
-      FILTER w.generatedByPlanner == true
-      FILTER e.validTo == null OR e.validTo > @now
-      RETURN { woKey: w._key, scheduledHourStart: w.scheduledHourStart,
-               estimatedHours: w.estimatedHours }
-  )
-  RETURN {
-    key: t._key, name: t.name, homeBase: t.homeBase,
-    certifications: t.certifications, matchingCerts: matching,
-    currentWorkOrders: LENGTH(wos), schedule: wos
-  }
+LET eligible = (
+  FOR t IN technicians
+    FILTER t.homeBase == ac.base
+    LET matching = INTERSECTION(t.certifications, eng.driverSubsystems)
+    FILTER LENGTH(matching) > 0
+    LET wos = (
+      FOR w, e IN 1..1 INBOUND t performedBy
+        FILTER w.generatedByPlanner == true
+        FILTER e.validTo == null OR e.validTo > @now
+        RETURN { woKey: w._key, scheduledHourStart: w.scheduledHourStart,
+                 estimatedHours: w.estimatedHours }
+    )
+    RETURN {
+      key: t._key, name: t.name, homeBase: t.homeBase,
+      certifications: t.certifications, matchingCerts: matching,
+      currentWorkOrders: LENGTH(wos), schedule: wos
+    }
+)
+RETURN {
+  wo_key: @wo_key,
+  engineId: wo.engineId,
+  driverSubsystems: eng.driverSubsystems,
+  base: ac.base,
+  eligible: eligible
+}
 """
 
 # Expire all currently-valid performedBy edges for a work order.
@@ -377,4 +429,19 @@ FOR e IN performedBy
   LET wo = DOCUMENT(e._from)
   FILTER wo.generatedByPlanner == true
   REMOVE e IN performedBy
+"""
+
+# ---------------------------------------------------------------------------
+# Planning dashboard — technician roster
+# ---------------------------------------------------------------------------
+
+Q_ALL_TECHNICIANS = """
+FOR t IN technicians
+  SORT t.homeBase ASC, t.name ASC
+  RETURN {
+    id: t._key,
+    name: t.name,
+    homeBase: t.homeBase,
+    certifications: t.certifications
+  }
 """

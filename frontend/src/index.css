@@ -31,6 +31,19 @@ a:hover { text-decoration: underline; }
 .layout { display: flex; height: 100dvh; overflow: hidden; }
 .main-area { flex: 1; overflow-y: auto; padding: 28px 32px; min-width: 0; }
 
+/* ── Auth bar ── */
+.auth-bar {
+  position: fixed; top: 12px; right: 16px; z-index: 100;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 12px 4px 6px;
+  font-size: 13px; color: var(--text2);
+}
+.auth-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+.auth-name { color: var(--text); }
+.auth-logout { color: var(--text2); font-size: 12px; }
+.auth-logout:hover { color: var(--critical); text-decoration: none; }
+
 /* ── Typography ── */
 h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 6px; }
 h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 16px; }
@@ -207,6 +220,11 @@ tbody td { padding: 11px 14px; }
                       font-size: 0.76rem; color: var(--text2);
                       border: 1px solid var(--border); border-radius: 6px;
                       padding: 4px 10px; background: var(--bg); }
+.plan-msg-system { align-self: center; background: var(--surface2);
+                   border: 1px solid var(--border); border-radius: 6px;
+                   padding: 6px 14px; font-size: 0.78rem; color: var(--text2);
+                   font-style: italic; max-width: 92%; text-align: center;
+                   white-space: pre-line; }
 .pending-edits { background: var(--surface2); border: 1px solid var(--border);
                  border-radius: var(--radius); padding: 12px 16px; margin-bottom: 12px; }
 .pending-edits-header { font-weight: 600; font-size: 0.85rem; color: var(--text2);
@@ -265,3 +283,48 @@ tbody td { padding: 11px 14px; }
 /* ── Clickable Gantt bars ── */
 .gantt-bar-clickable { cursor: pointer; }
 .gantt-bar-clickable:hover { filter: brightness(1.25); }
+
+/* ── Tech Docs ── */
+.tech-docs-section { margin-top: 20px; }
+.tech-docs-toggle {
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text2); cursor: pointer; font-size: 0.82rem; padding: 6px 12px;
+  width: 100%; text-align: left; display: flex; align-items: center; gap: 6px;
+}
+.tech-docs-toggle:hover { border-color: var(--accent); color: var(--text); }
+.tech-docs-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.tech-docs-unconfigured, .tech-docs-empty {
+  font-size: 0.82rem; color: var(--text2); padding: 10px 0;
+}
+.tech-docs-unconfigured code { color: var(--accent); font-size: 0.8rem; }
+.tech-doc-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+}
+.tech-doc-header {
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; margin-bottom: 6px;
+}
+.tech-doc-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tech-doc-badge {
+  font-size: 0.7rem; font-weight: 700; border-radius: 4px;
+  padding: 1px 6px; flex-shrink: 0;
+}
+.tech-doc-badge-ad { background: rgba(248,81,73,0.18); color: var(--critical); }
+.tech-doc-badge-sb { background: rgba(210,153,34,0.18); color: var(--warning); }
+.tech-doc-number { font-family: 'SF Mono','Fira Code',monospace; font-size: 0.78rem; color: var(--text2); }
+.tech-doc-issuer { font-size: 0.78rem; color: var(--text2); }
+.tech-doc-expand { font-size: 0.65rem; color: var(--text2); flex-shrink: 0; }
+.tech-doc-title { font-size: 0.88rem; font-weight: 500; line-height: 1.4; margin-bottom: 6px; }
+.tech-doc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.tech-doc-interval { font-size: 0.78rem; color: var(--warning); margin-bottom: 4px; }
+.tech-doc-actions { margin-top: 8px; }
+.tech-doc-actions-label {
+  font-size: 0.72rem; font-weight: 600; color: var(--text2);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px;
+}
+.tech-doc-actions-text { font-size: 0.82rem; color: var(--text); line-height: 1.5; white-space: pre-line; }
+.tech-doc-content { font-size: 0.8rem; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+.tech-docs-context {
+  font-size: 0.72rem; color: var(--text2); text-align: right; padding-top: 4px;
+}

@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Secrets and local config
+.env*
+!.env.example
+
+# Dev artefacts
+.git/
+*.md
+PLAN.md
+CLAUDE.md
+docs-arango-ai-*.md
+
+# Docker
+docker-compose.yml
+scorer_service/Dockerfile
