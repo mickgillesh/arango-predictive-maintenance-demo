@@ -13,13 +13,22 @@ Query types (from the SDK's retrievers.proto):
 
 from __future__ import annotations
 
+import ssl
 import textwrap
 import time
 from typing import Any
 
 import httpx
 
+from backend.db import tls_verify
+
 GLOBAL, LOCAL, UNIFIED, CUSTOM = 1, 2, 3, 4
+
+
+def _httpx_verify() -> bool | ssl.SSLContext:
+    """``ARANGO_TLS_VERIFY`` in the form httpx expects (a CA path becomes an SSL context)."""
+    verify = tls_verify()
+    return ssl.create_default_context(cafile=verify) if isinstance(verify, str) else verify
 
 _JWT_TTL_SECONDS = 50 * 60
 _jwt_cache: dict[tuple[str, str], tuple[str, float]] = {}
@@ -32,7 +41,8 @@ def get_jwt(arango_url: str, username: str, password: str) -> str:
     if cached and time.monotonic() - cached[1] < _JWT_TTL_SECONDS:
         return cached[0]
     resp = httpx.post(f"{arango_url.rstrip('/')}/_open/auth",
-                      json={"username": username, "password": password}, timeout=30)
+                      json={"username": username, "password": password}, timeout=30,
+                      verify=_httpx_verify())
     resp.raise_for_status()
     token = resp.json()["jwt"]
     _jwt_cache[key] = (token, time.monotonic())
@@ -64,7 +74,8 @@ def graphrag_query(
                 "auto_create_indexes": auto_create_indexes}
     body.update({k: v for k, v in optional.items() if v is not None})
     resp = httpx.post(f"{retriever_url.rstrip('/')}/v1/graphrag-query", json=body,
-                      headers={"Authorization": f"Bearer {jwt}"}, timeout=timeout)
+                      headers={"Authorization": f"Bearer {jwt}"}, timeout=timeout,
+                      verify=_httpx_verify())
     if resp.status_code >= 400:
         raise RuntimeError(f"graphrag-query HTTP {resp.status_code}: {resp.text[:500]}")
     return resp.json()

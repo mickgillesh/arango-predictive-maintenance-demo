@@ -16,7 +16,8 @@ on the platform notebook server of a fresh cluster. Answer key:
 ### Checklist
 
 - [ ] Fresh cluster with the AI Suite enabled; you can log in to the web UI.
-- [ ] Notebook server kernel is **Python 3.12+**: `import sys; sys.version`.
+- [ ] Notebook server kernel is **Python 3.12+**: `import sys; sys.version`. If it is
+      3.11, create a 3.12 kernel (below).
 - [ ] Notebook server can reach `github.com` (repo + SDK) and `data.nasa.gov` (C-MAPSS).
       If NASA is blocked, upload `train_FD001.txt` to `data/` in the cloned repo.
 - [ ] A database user with permission to create databases (for `aerofleet_enablement`).
@@ -26,6 +27,22 @@ on the platform notebook server of a fresh cluster. Answer key:
 - [ ] This branch pushed to GitHub, so the notebook can clone it.
 - [ ] Dry run of the whole notebook with a throwaway project. Note the timings for §5
       and §8, which are the slow steps, and fill in the table below.
+
+### Python 3.12 kernel (if the server's default is 3.11)
+
+The SDK uses Python 3.12 syntax (PEP 695 generics and `type` aliases), so it cannot be
+installed on 3.11. In a terminal on the notebook server:
+
+```bash
+python -m pip install --user -q uv
+python -m uv venv --seed --python 3.12 ~/.venvs/aerofleet312   # --seed adds pip (needed by §1)
+python -m uv pip install --python ~/.venvs/aerofleet312/bin/python ipykernel
+~/.venvs/aerofleet312/bin/python -m ipykernel install --user \
+    --name aerofleet312 --display-name "Python 3.12 (AeroFleet)"
+```
+
+Reload the browser tab, choose **Kernel → Change Kernel → Python 3.12 (AeroFleet)**, and run
+the notebook from §0. §1 installs into this kernel's environment (`sys.executable -m pip`).
 
 ### Verify on the cluster — record the outcomes
 
@@ -130,8 +147,11 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| `%pip install` of the SDK fails | No GitHub access, or kernel below Python 3.12 | Switch kernel; or `pip download` the SDK on a laptop and upload the wheel |
+| §0 asserts "needs Python 3.12+" | Server default kernel is 3.11 | Create the 3.12 kernel (section 1) and switch to it |
+| §1: "No module named pip" | Kernel venv created without `--seed` | `python -m uv pip install --python ~/.venvs/aerofleet312/bin/python pip`; restart kernel |
+| §1 SDK install fails | No GitHub access | `pip download` the SDK on a laptop and upload the wheel |
 | C-MAPSS download fails | NASA blocked | Upload `train_FD001.txt` to `data/` in the repo folder; re-run §2 |
+| §2 `CERTIFICATE_VERIFY_FAILED: self-signed certificate` | Cluster CA not trusted (§0 uses `ARANGO_DEPLOYMENT_CA` by default) | Check `echo $ARANGO_DEPLOYMENT_CA` in a terminal; otherwise set `ARANGO_TLS_VERIFY=false` in §0 and re-run from §0 |
 | `ensure_database()` permission error | User cannot create databases | Create `aerofleet_enablement` in the web UI; re-run |
 | AutoGraph deploy rejected | `FPS_RECOVERY_USERNAME` missing or without rights | Create the user / grant rw; re-run deploy |
 | §5 build very slow | LLM rate limits | Talk through the corpus and `QUESTIONS.md`; continue when done |
