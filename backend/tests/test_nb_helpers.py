@@ -78,6 +78,18 @@ def test_summary_unified_and_global() -> None:
     assert "graph: documents: 2 Communities" in glob
 
 
+def test_summary_custom_tool_graph() -> None:
+    """Shape returned by a custom tool on the platform (2026-11-11)."""
+    meta = {"graph_metadata": {"documents": ["engines/48", "engines/51", "engines/9"],
+                               "edges": [],
+                               "by_query": [{"query": "", "step_id": None,
+                                             "documents": ["engines/48"]}]},
+            "partition_routing": {"mode": "tool_config_disabled"}}
+    text = "\n".join(summarize_metadata(meta))
+    assert "graph: documents: 3 engines | edges: 0 items | by_query: 1 items" in text
+    assert "tool_config_disabled" in text
+
+
 def test_summary_tolerates_unknown_shapes() -> None:
     assert summarize_metadata("plain text") == ["plain text"]
     assert summarize_metadata({"tool_calls": [1, 2]}) == ["also: tool_calls (6 chars)"]

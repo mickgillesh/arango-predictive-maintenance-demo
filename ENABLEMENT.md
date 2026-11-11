@@ -55,7 +55,7 @@ result of the dry run so there are no surprises live.
 | 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
 | 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | **`Tools`** (shared by all projects in the database), verified 2026-11-11 |
 | 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | Work. **The retriever binds `@nodes`, `@@relations_collection` and `@top_k` into every expansion**; a template must declare all three or the AQL fails and the tool silently answers from the plain search hits (`failed_tools` stays empty). Fixed in all four tools, verified 2026-11-11 |
-| 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | **No `partition_id` needed, but `auto_select_partitions: false` is required**: with the default, the fleet tools retrieve nothing (verified 2026-11-11). Now set in the fleet tools' own config |
+| 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | **No `partition_id` needed, but `auto_select_partitions: false` is required**: with the default, the fleet tools retrieve nothing (verified 2026-11-11). Now set in the fleet tools' own config; the metadata confirms it (`partition_routing.mode: tool_config_disabled`) |
 | 6 | `ingest(incremental=True)` accepts a new file in the already-built category | §8 (falls back to a new category) | |
 | 7 | `FPS_RECOVERY_USERNAME` accepted | §5 deploy | |
 
@@ -156,7 +156,9 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
   identical fleet-status queries sometimes returned nothing (no `graph_metadata`), in
   about 4 of 17 runs with the full template. Dropping the top-level `content` field from the
   expansion rows gave 3/3, but that sample is small and a simpler template also failed 0/3,
-  so the root cause is not confirmed. The §7 check retries up to 3 times and prints the
+  so the root cause is not confirmed. After the field was removed, every repeated §7 check
+  succeeded on attempt 1 with the full expansion (aircraft, bases, blocking parts matching
+  `QUESTIONS.md` B1). The §7 check still retries up to 3 times and prints the
   attempt number. **Track the attempt numbers across dry runs**, and check the retriever
   service logs for a failing query before raising it with the AI Suite team.
 

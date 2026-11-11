@@ -119,6 +119,15 @@ def _collection_counts(items: list[Any]) -> str:
     return ", ".join(f"{n} {name}" for name, n in counts.most_common())
 
 
+def _graph_value(value: Any) -> str:
+    """'3 engines' for a list of ids, 'N items' for other lists, a clipped value otherwise."""
+    if isinstance(value, list):
+        if value and all(isinstance(v, str) for v in value):
+            return _collection_counts(value)
+        return f"{len(value)} items"
+    return _clip(value, 60)
+
+
 # Keys summarize_metadata() renders explicitly; anything else is listed by size.
 _SUMMARISED = {
     "model", "llm_planner_used", "original_query_type", "completed_steps", "total_steps",
@@ -176,8 +185,7 @@ def summarize_metadata(meta: Any, max_items: int = 8) -> list[str]:
             out.append(f"  [{key}] {_cited_title(content)}")
     graph = meta.get("graph_metadata")
     if isinstance(graph, dict) and graph:
-        parts = [f"{k}: {_collection_counts(v)}" if isinstance(v, list) and v
-                 else f"{k}: {_clip(v, 60)}" for k, v in graph.items()]
+        parts = [f"{k}: {_graph_value(v)}" for k, v in graph.items()]
         out.append("graph: " + " | ".join(parts))
     if meta.get("partition_routing"):
         out.append("partition routing: " + _clip(json.dumps(meta["partition_routing"],
