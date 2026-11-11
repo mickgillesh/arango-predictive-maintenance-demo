@@ -28,6 +28,12 @@ from backend.db import get_db  # noqa: E402
 # Must match the embedding model configured on the AutoRAG retriever, otherwise
 # the retriever's query vectors and these note vectors live in different spaces.
 _EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+# The vectors must also have the same LENGTH as the retriever's query vectors:
+# the AI Suite retriever embedded queries at 512 dimensions (dry run 2026-11-11:
+# "a vector must be of dimension 1536, but is 512"). text-embedding-3-* models
+# shorten natively via the `dimensions` parameter. The notebook (§7) reads the
+# real value from AutoGraph's chunk embeddings and re-embeds if it differs.
+_DEFAULT_DIMENSIONS = 512
 _ENGINE_COUNT = 100
 # Name the Custom Retriever looks for (idx_vector_{collection}_{field}), so
 # auto_create_indexes finds this index instead of building a second one.
@@ -143,13 +149,25 @@ def _generate_note(engine: dict[str, Any], rng: random.Random) -> str:
 # Vector index helpers
 # ---------------------------------------------------------------------------
 
+def embedding_dimensions() -> int:
+    """Target length of the note embeddings: ``EMBEDDING_DIMENSIONS`` or 512."""
+    return int(os.environ.get("EMBEDDING_DIMENSIONS") or _DEFAULT_DIMENSIONS)
+
+
 def _ensure_vector_index(db: Any, dimension: int) -> None:
-    """Create a cosine vector index on engines.notesEmbedding if absent."""
+    """Create the cosine vector index on engines.notesEmbedding, replacing any
+    vector index on that field with a different dimension (a stale index makes
+    every vector query fail)."""
     col = db.collection("engines")
-    existing = col.indexes()
-    if any(idx.get("type") == "vector" for idx in existing):
-        print("  Vector index already present — skipping creation.")
-        return
+    for idx in col.indexes():
+        if idx.get("type") != "vector" or idx.get("fields") != ["notesEmbedding"]:
+            continue
+        if (idx.get("params") or {}).get("dimension") == dimension:
+            print(f"  Vector index {idx.get('name')} already present ({dimension}-dim).")
+            return
+        col.delete_index(idx["id"].split("/")[-1])
+        print(f"  Dropped vector index {idx.get('name')} "
+              f"({(idx.get('params') or {}).get('dimension')}-dim).")
     col.add_index({
         "type": "vector",
         "name": _VECTOR_INDEX_NAME,
@@ -167,20 +185,25 @@ def _ensure_vector_index(db: Any, dimension: int) -> None:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def embed_and_writeback() -> int:
+def embed_and_writeback(dimensions: int | None = None) -> int:
     """Generate notes + embeddings and write back to engine vertices.
 
+    ``dimensions`` defaults to :func:`embedding_dimensions`. Engines whose
+    embedding already has that length are left alone, so re-running is cheap,
+    and a dimension change re-embeds everything and rebuilds the vector index.
     Returns the number of documents updated (0 if already complete).
     """
     from openai import OpenAI
 
     db = get_db()
+    dimensions = dimensions or embedding_dimensions()
 
-    # Idempotency: count engines that already have an embedding
-    cursor = db.aql.execute(Q_EMBED_COUNT_EMBEDDED)
+    # Idempotency: count engines that already have an embedding of this length
+    cursor = db.aql.execute(Q_EMBED_COUNT_EMBEDDED, bind_vars={"dimension": dimensions})
     already = next(iter(cursor), 0)
     if already >= _ENGINE_COUNT:
-        print(f"All {_ENGINE_COUNT} engines already embedded — nothing to do.")
+        print(f"All {_ENGINE_COUNT} engines already embedded ({dimensions}-dim) — nothing to do.")
+        _ensure_vector_index(db, dimension=dimensions)
         return 0
 
     print(f"  {already}/{_ENGINE_COUNT} engines embedded — generating the rest.")
@@ -201,9 +224,9 @@ def embed_and_writeback() -> int:
 
     # One batch API call for all 100 notes
     client = OpenAI()
-    print(f"  Calling OpenAI {_EMBED_MODEL} for {len(notes)} notes…")
+    print(f"  Calling OpenAI {_EMBED_MODEL} ({dimensions}-dim) for {len(notes)} notes…")
     t0 = time.monotonic()
-    response = client.embeddings.create(model=_EMBED_MODEL, input=notes)
+    response = client.embeddings.create(model=_EMBED_MODEL, input=notes, dimensions=dimensions)
     print(f"  Embeddings received in {time.monotonic() - t0:.1f}s.")
 
     ordered = sorted(response.data, key=lambda d: d.index)

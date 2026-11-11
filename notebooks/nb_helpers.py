@@ -14,6 +14,7 @@ Query types (from the SDK's retrievers.proto):
 from __future__ import annotations
 
 import json
+import re
 import ssl
 import textwrap
 import time
@@ -119,10 +120,13 @@ def _collection_counts(items: list[Any]) -> str:
     return ", ".join(f"{n} {name}" for name, n in counts.most_common())
 
 
+_DOC_ID = re.compile(r"^[\w-]+/\S+$")
+
+
 def _graph_value(value: Any) -> str:
-    """'3 engines' for a list of ids, 'N items' for other lists, a clipped value otherwise."""
+    """'3 engines' for a list of document ids, 'N items' for other lists, else clipped."""
     if isinstance(value, list):
-        if value and all(isinstance(v, str) for v in value):
+        if value and all(isinstance(v, str) and _DOC_ID.match(v) for v in value):
             return _collection_counts(value)
         return f"{len(value)} items"
     return _clip(value, 60)
@@ -133,7 +137,8 @@ _SUMMARISED = {
     "model", "llm_planner_used", "original_query_type", "completed_steps", "total_steps",
     "iterations", "execution_log", "search_methods_used", "total_results",
     "final_results_count", "status", "final_support_points", "citation_mapping",
-    "graph_metadata", "partition_routing",
+    "graph_metadata", "partition_routing", "custom_retrievers_used", "num_tools",
+    "successful_tools", "failed_tools",
 }
 
 
@@ -153,6 +158,10 @@ def summarize_metadata(meta: Any, max_items: int = 8) -> list[str]:
     out: list[str] = []
     if meta.get("model"):
         out.append(f"model: {meta['model']}")
+    if "custom_retrievers_used" in meta or "successful_tools" in meta:
+        out.append(
+            f"tools: used {meta.get('custom_retrievers_used')} | succeeded "
+            f"{meta.get('successful_tools')} | failed {meta.get('failed_tools')}")
     if "execution_log" in meta or "llm_planner_used" in meta:
         out.append(
             f"LLM planner: {meta.get('llm_planner_used')} | original query type: "

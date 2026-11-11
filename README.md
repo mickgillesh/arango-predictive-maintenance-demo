@@ -141,6 +141,7 @@ make tools                     # re-register retriever tools (needs PROJECT_NAME
 | `ARANGO_TLS_VERIFY` | everything | `true` (default), `false` for a self-signed cluster certificate, or a CA bundle path |
 | `OPENAI_API_KEY` | embed, notebook | Note embeddings; AI Suite secret profiles |
 | `CHAT_MODEL`, `EMBEDDING_MODEL` | notebook, embed | Must match between `make embed` and AutoRAG |
+| `EMBEDDING_DIMENSIONS` | embed | Note-embedding length; must equal the retriever's (512 on the platform; default) |
 | `PROJECT_NAME` | notebook, `make tools` | AutoGraph project (auto-generated per run if unset) |
 | `FPS_RECOVERY_USERNAME` | notebook | AutoGraph File Parser recovery user |
 | `TOOLS_COLLECTION` | notebook, `make tools` | Override the Tools collection (default `Tools`, verified on the platform) |

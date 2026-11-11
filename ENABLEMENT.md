@@ -129,6 +129,10 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 - Blocking parts are computed before the parts list is truncated, so a zero-stock part is
   never hidden.
 - **Deep Search** lets an LLM planner pick tools by description and combine results.
+- **Semantic search over your own data needs matching vectors**: the same embedding model
+  *and the same length*. The AI Suite retriever embeds queries at 512 dimensions, so the
+  engine notes are embedded at 512 (not the model's native 1536) with a matching vector
+  index. §7 reads the length from AutoGraph's chunk embeddings and re-embeds if needed.
 - **The template contract (learned the hard way in the dry run).** The retriever binds
   `@nodes`, `@@relations_collection` and `@top_k` into every expansion. ArangoDB rejects a
   bind parameter the query does not declare, so a template that leaves one out fails, and
@@ -185,6 +189,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 | §1: "No module named pip" | Kernel venv created without `--seed` | `python -m uv pip install --python ~/.venvs/aerofleet312/bin/python pip`; restart kernel |
 | §1 SDK install fails | No GitHub access | `pip download` the SDK on a laptop and upload the wheel |
 | §2 "Could not download C-MAPSS FD001" | `data/train_FD001.txt` missing from the clone | `git checkout -- data/train_FD001.txt` (or upload it to `data/`); re-run §2 |
+| Fleet-engine tool: `a vector must be of dimension 1536, but is 512` | Note embeddings longer than the retriever's query vectors | §7's first cell re-embeds the notes at AutoGraph's chunk-embedding length (512 on the platform) and rebuilds the index; re-run it |
 | §2 `CERTIFICATE_VERIFY_FAILED: self-signed certificate` | Cluster CA not trusted (§0 uses `ARANGO_DEPLOYMENT_CA` by default) | Check `echo $ARANGO_DEPLOYMENT_CA` in a terminal; otherwise set `ARANGO_TLS_VERIFY=false` in §0 and re-run from §0 |
 | `ensure_database()` permission error | User cannot create databases | Create `aerofleet_enablement` in the web UI; re-run |
 | AutoGraph deploy rejected | `FPS_RECOVERY_USERNAME` missing or without rights | Create the user / grant rw; re-run deploy |

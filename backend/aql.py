@@ -158,11 +158,21 @@ Q_HEALTH_CHECK = "RETURN { db: 'ok', version: VERSION() }"
 # Technician-note embeddings (pipeline/embed_runner.py)
 # ---------------------------------------------------------------------------
 
+# Engines whose notesEmbedding has the expected length. Bind params: @dimension
 Q_EMBED_COUNT_EMBEDDED = """
 FOR e IN engines
-  FILTER HAS(e, 'notesEmbedding')
+  FILTER HAS(e, 'notesEmbedding') AND LENGTH(e.notesEmbedding) == @dimension
   COLLECT WITH COUNT INTO n
   RETURN n
+"""
+
+# Length of the embeddings in any collection (e.g. AutoGraph chunks), to match
+# the note embeddings to the retriever. Bind params: @@coll, @field
+Q_EMBEDDING_DIMENSION = """
+FOR d IN @@coll
+  FILTER IS_ARRAY(d[@field])
+  LIMIT 1
+  RETURN LENGTH(d[@field])
 """
 
 # SORT is required for determinism: embed_runner consumes a seeded RNG in this
@@ -249,8 +259,10 @@ FOR n IN nodes
         relationship: e.description
       }
   )
+  // Shape follows the documented entity-expander example: node_id, no top-level
+  // `content` (rows with one were intermittently dropped in the dry run).
   RETURN {
-    content:          CONCAT(entity.entity_name, ": ", entity.description),
+    node_id:          entity._key,
     entity_name:      entity.entity_name,
     entity_type:      entity.entity_type,
     description:      entity.description,

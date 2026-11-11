@@ -193,3 +193,13 @@ def test_fleet_expand_accepts_keys_and_respects_top_k(db) -> None:
     one = list(db.aql.execute(Q_TOOL_FLEET_EXPAND,
                               bind_vars={"nodes": ids, **params, "top_k": 1}))
     assert len(one) == 1
+
+
+def test_embedding_dimension_queries(db) -> None:
+    """Read-only: the queries embed_runner and notebook §7 use to align vector lengths."""
+    from backend.aql import Q_EMBED_COUNT_EMBEDDED, Q_EMBEDDING_DIMENSION
+    db.aql.validate(Q_EMBED_COUNT_EMBEDDED)
+    db.aql.validate(Q_EMBEDDING_DIMENSION)
+    dims = list(db.aql.execute(Q_EMBEDDING_DIMENSION,
+                               bind_vars={"@coll": "engines", "field": "notesEmbedding"}))
+    assert len(dims) <= 1 and all(isinstance(d, int) for d in dims)

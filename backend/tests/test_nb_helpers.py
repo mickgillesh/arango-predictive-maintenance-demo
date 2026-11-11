@@ -90,6 +90,17 @@ def test_summary_custom_tool_graph() -> None:
     assert "tool_config_disabled" in text
 
 
+def test_summary_shows_tools_and_text_lists() -> None:
+    """Deep Search metadata (2026-11-11): tool outcome keys, and by_query as long text."""
+    meta = {"custom_retrievers_used": ["a", "b"], "num_tools": 2, "successful_tools": ["a"],
+            "failed_tools": ["b"],
+            "graph_metadata": {"documents": ["p_Chunks/1"], "by_query": ["**content:** x y"]}}
+    text = "\n".join(summarize_metadata(meta))
+    assert "tools: used ['a', 'b'] | succeeded ['a'] | failed ['b']" in text
+    assert "documents: 1 Chunks | by_query: 1 items" in text
+    assert "also:" not in text
+
+
 def test_summary_tolerates_unknown_shapes() -> None:
     assert summarize_metadata("plain text") == ["plain text"]
     assert summarize_metadata({"tool_calls": [1, 2]}) == ["also: tool_calls (6 chars)"]
