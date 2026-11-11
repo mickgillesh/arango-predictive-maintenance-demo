@@ -53,3 +53,10 @@ def test_no_partition_id_tagging() -> None:
     """No cell writes a partition_id onto documents (the removed workaround)."""
     code = "\n".join(CODE)
     assert not re.search(r"""["']partition_id["']\s*:|\bpartition_id\s*=""", code)
+
+
+def test_resume_is_off_by_default() -> None:
+    """A top-to-bottom run must not take the resume shortcut."""
+    sources = ["".join(c["source"]) for c in NB["cells"] if c["cell_type"] == "code"]
+    assert any(s.startswith("RESUME = False") for s in sources)
+    assert not any("RESUME = True" in s for s in sources)

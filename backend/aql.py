@@ -31,6 +31,16 @@ LET engine_list = (
 RETURN { kpi: kpi, engines: engine_list }
 """
 
+# Engines in one risk bucket with their aircraft (notebook §2 and resume cell).
+Q_ENGINES_BY_RISK = """
+FOR e IN engines
+  FILTER e.riskBucket == @risk
+  LET ac = FIRST(FOR a IN 1..1 OUTBOUND e installedOn RETURN a)
+  SORT e.predictedRUL
+  RETURN {engine: e._key, model: e.model, rul: e.predictedRUL,
+          driverSubsystems: e.driverSubsystems, tail: ac.tailNumber, base: ac.base}
+"""
+
 # ---------------------------------------------------------------------------
 # Single engine
 # ---------------------------------------------------------------------------

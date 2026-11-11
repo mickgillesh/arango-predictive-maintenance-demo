@@ -155,6 +155,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 | `ensure_database()` permission error | User cannot create databases | Create `aerofleet_enablement` in the web UI; re-run |
 | AutoGraph deploy rejected | `FPS_RECOVERY_USERNAME` missing or without rights | Create the user / grant rw; re-run deploy |
 | §6/§8 `PlatformUnreachableError: … did not answer within the request timeout` | A retriever query took longer than the SDK's 60 s default | §3 raises it to `REQUEST_TIMEOUT` (300 s); raise further and re-run the question. The first query after a deploy is the slowest |
+| `NameError` (e.g. `answers`, `rag`, `db`) after logging back in | Kernel restarted; variables lost, cluster state intact | Run §0 and §1, set `RESUME = True` in the Resume cell and run it, then re-run the section you were on. §6 reuses the deployed retriever |
 | §5 build very slow | LLM rate limits | Talk through the corpus and `QUESTIONS.md`; continue when done |
 | Tool queries return errors | Tools collection mismatch | The §7 check switches collection automatically; otherwise set `TOOLS_COLLECTION` |
 | Fleet tools return nothing | Partition selection | §7 retries with `auto_select_partitions: false`; if it still fails, stop and show the dry-run output |
