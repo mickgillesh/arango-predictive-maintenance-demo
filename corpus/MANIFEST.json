@@ -1,0 +1,973 @@
+{
+  "category": "maintenance_docs",
+  "fleet_models": [
+    "CFM56-7B27",
+    "CFM56-5B4",
+    "V2527-A5",
+    "PW4077D"
+  ],
+  "subsystems": [
+    "fan",
+    "LPC",
+    "HPC",
+    "combustor",
+    "HPT",
+    "LPT"
+  ],
+  "counts": {
+    "initial": 36,
+    "incremental": 1
+  },
+  "total_words": 36133,
+  "documents": [
+    {
+      "doc_id": "AD-EASA-2023-0891",
+      "title": "LPT Stage 1 Blade Replacement",
+      "stage": "initial",
+      "path": "initial/AD-EASA-2023-0891.md",
+      "doc_type": "Airworthiness Directive (Emergency)",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2023-07-14",
+      "engine_models": [
+        "Trent 700"
+      ],
+      "subsystems": [
+        "LPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "SB-RR-TRENT700-72-0234"
+      ],
+      "fleet_linked": false,
+      "words": 786,
+      "sha256": "0b42f4650fdc94fa6a6fe9866618d4d25279d6d0c5ddc563f14c4053fc971e13"
+    },
+    {
+      "doc_id": "AD-EASA-2023-1423",
+      "title": "HPC Stage 6-8 Labyrinth Seal Inspection and Replacement",
+      "stage": "initial",
+      "path": "initial/AD-EASA-2023-1423.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2023-12-01",
+      "engine_models": [
+        "PW4077D",
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-PW4000-72-00-00-200-801",
+        "AMM-V2500-72-00-00-200-802",
+        "SB-IAE-V2500-A5-72-0103",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1219,
+      "sha256": "8b0fa3d2952cab2d4d4bd890b58aa4132b87acb874d17a298084906a4f84881e"
+    },
+    {
+      "doc_id": "AD-EASA-2024-0312",
+      "title": "HPC Stage 3-5 Blade Visual and Borescope Inspection",
+      "stage": "initial",
+      "path": "initial/AD-EASA-2024-0312.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2024-01-22",
+      "engine_models": [
+        "CFM56-7B27"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [],
+      "related": [
+        "SB-CFM-56-72-0193",
+        "AMM-CFM56-7B-72-00-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1733,
+      "sha256": "8a32d113c96bf8fb7f1546094adbeb67415f0676c557dfa1ab58d984f30ed7a0"
+    },
+    {
+      "doc_id": "AD-EASA-2024-0756",
+      "title": "Fan Blade Platform Fatigue Crack Inspection",
+      "stage": "initial",
+      "path": "initial/AD-EASA-2024-0756.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2024-04-03",
+      "engine_models": [
+        "Trent 700",
+        "GE90-115B"
+      ],
+      "subsystems": [
+        "fan"
+      ],
+      "supersedes": [],
+      "related": [
+        "SB-RR-TRENT700-72-0289"
+      ],
+      "fleet_linked": false,
+      "words": 743,
+      "sha256": "800d0866169142b3e0c905fe364f8e235e76cea03a325c3b439ea1fb9e40fb75"
+    },
+    {
+      "doc_id": "AD-EASA-2024-1167",
+      "title": "LPC Blade Leading Edge Erosion Measurement",
+      "stage": "initial",
+      "path": "initial/AD-EASA-2024-1167.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2024-05-30",
+      "engine_models": [
+        "CFM56-5B4",
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "LPC"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-CFM56-5B-72-22-00-200-801",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1032,
+      "sha256": "c21e80c9ee3410eb0976a4578daf330335f4d70a1cb370c1030a0f974642bf00"
+    },
+    {
+      "doc_id": "AD-FAA-2023-1889",
+      "title": "HPT Shroud Clearance Measurement and Segment Replacement",
+      "stage": "initial",
+      "path": "initial/AD-FAA-2023-1889.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "Federal Aviation Administration (FAA)",
+      "effective_date": "2023-09-22",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-PW4000-72-51-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1015,
+      "sha256": "198ce21f131508792d1b5948aedf912147763ffb7df836bc5e4015ff394f5e70"
+    },
+    {
+      "doc_id": "AD-FAA-2023-2156",
+      "title": "HPT Rotor Disc Ultrasonic Inspection",
+      "stage": "initial",
+      "path": "initial/AD-FAA-2023-2156.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "Federal Aviation Administration (FAA)",
+      "effective_date": "2023-11-08",
+      "engine_models": [
+        "GE90-115B",
+        "CF6-80C2"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "SB-GE-GE90-72-0312",
+        "AD-FAA-2024-1334"
+      ],
+      "fleet_linked": false,
+      "words": 733,
+      "sha256": "7a7093a65dcd192d4c4ea7009c4c09516bac4b12595f4dc01f7a8b75fb4ba2fb"
+    },
+    {
+      "doc_id": "AD-FAA-2024-0583",
+      "title": "Combustion Liner Thermal Cracking and Fuel Nozzle Inspection",
+      "stage": "initial",
+      "path": "initial/AD-FAA-2024-0583.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "Federal Aviation Administration (FAA)",
+      "effective_date": "2024-02-09",
+      "engine_models": [
+        "V2527-A5",
+        "CFM56-7B27"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-CFM56-72-41-00-200-801",
+        "AMM-V2500-72-41-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1295,
+      "sha256": "4b2b94f89d2a1d2bb5976acd05ac09a3f5431d6c28b1fd3eb64346af43611a04"
+    },
+    {
+      "doc_id": "AD-FAA-2024-1042",
+      "title": "Fan Blade Fracture Inspection",
+      "stage": "initial",
+      "path": "initial/AD-FAA-2024-1042.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "Federal Aviation Administration (FAA)",
+      "effective_date": "2024-03-15",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "fan"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-CFM56-72-21-00-200-801",
+        "SB-CFM-56-72-0228",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1303,
+      "sha256": "b1fdda3505f04acb33ba8f6ae912269afcc744188d2695991d64a733631797dc"
+    },
+    {
+      "doc_id": "AD-FAA-2024-1334",
+      "title": "Fuel Nozzle Coking and Primary Combustor Zone Inspection",
+      "stage": "initial",
+      "path": "initial/AD-FAA-2024-1334.md",
+      "doc_type": "Airworthiness Directive",
+      "issuer": "Federal Aviation Administration (FAA)",
+      "effective_date": "2024-06-17",
+      "engine_models": [
+        "CF6-80C2"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-FAA-2023-2156",
+        "SB-GE-CF6-72-0451"
+      ],
+      "fleet_linked": false,
+      "words": 726,
+      "sha256": "ee5b506a5d2f51c7c10668f4cb791857c1b081b54c6d0985c65e1d2e86932a44"
+    },
+    {
+      "doc_id": "AMM-CFM56-5B-72-22-00-200-801",
+      "title": "Booster (LPC) Stage 1 Blade Inspection and Chord Measurement",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-5B-72-22-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-05-30",
+      "engine_models": [
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "LPC"
+      ],
+      "supersedes": [
+        "AMM-CFM56-5B-72-22-00-200-801 Revision 15"
+      ],
+      "related": [
+        "AD-EASA-2024-1167",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-CFM56-72-21-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 895,
+      "sha256": "2beddcaf00e2c9494b455df0a7a5c42fbf059f8085be577a5626141042ed8276"
+    },
+    {
+      "doc_id": "AMM-CFM56-72-00-00-100-801",
+      "title": "Engine Motoring Water Wash (Compressor Performance Recovery)",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-72-00-00-100-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-02-14",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "HPC",
+        "LPC"
+      ],
+      "supersedes": [
+        "AMM-CFM56-72-00-00-100-801 Revision 37"
+      ],
+      "related": [
+        "SB-CFM-56-72-0193",
+        "AD-EASA-2024-0312",
+        "AMM-CFM56-7B-72-00-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1218,
+      "sha256": "d514bf23e81182c9392ce0e2a298c2e96be0177c8716d47b763169c8a27d15ad"
+    },
+    {
+      "doc_id": "AMM-CFM56-72-21-00-200-801",
+      "title": "Fan Blade Removal, Fluorescent Penetrant Inspection and Dovetail Lubrication",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-72-21-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-03-15",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "fan"
+      ],
+      "supersedes": [
+        "AMM-CFM56-72-21-00-200-801 Revision 29"
+      ],
+      "related": [
+        "AD-FAA-2024-1042",
+        "SB-CFM-56-72-0228",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1166,
+      "sha256": "599acc2ae3237ad12c5f828e9b491a21505a32eb2137f4326afc801e6b1ade5f"
+    },
+    {
+      "doc_id": "AMM-CFM56-72-41-00-200-801",
+      "title": "Combustion Chamber and Fuel Nozzle Borescope Inspection",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-72-41-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-02-09",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [
+        "AMM-CFM56-72-41-00-200-801 Revision 33"
+      ],
+      "related": [
+        "AD-FAA-2024-0583",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-CFM56-7B-72-00-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 1136,
+      "sha256": "8e0f04be9b03c1282a6a67b4feab99316d6eb48124bb7be6165136a1825f6a91"
+    },
+    {
+      "doc_id": "AMM-CFM56-72-54-00-200-801",
+      "title": "LPT Stage 1-4 Borescope Inspection and Tip Seal Assessment",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-72-54-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-06-10",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "LPT"
+      ],
+      "supersedes": [
+        "AMM-CFM56-72-54-00-200-801 Revision 20"
+      ],
+      "related": [
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-CFM56-72-41-00-200-801",
+        "AMM-CFM56-7B-72-00-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 906,
+      "sha256": "8fda603ab0c0d47aba9512f813b14ac3e1a34ac95a58f9f0f12f6fc13f036eb1"
+    },
+    {
+      "doc_id": "AMM-CFM56-7B-72-00-00-200-801",
+      "title": "HPC Borescope Inspection, Stages 1-9",
+      "stage": "initial",
+      "path": "initial/AMM-CFM56-7B-72-00-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "CFM International",
+      "effective_date": "2024-03-01",
+      "engine_models": [
+        "CFM56-7B27"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [
+        "AMM-CFM56-7B-72-00-00-200-801 Revision 41"
+      ],
+      "related": [
+        "AD-EASA-2024-0312",
+        "SB-CFM-56-72-0193",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1396,
+      "sha256": "53ab3d4968df22357e1620b47fad0d09bb1ba30d38db0685b12c970a9c311409"
+    },
+    {
+      "doc_id": "AMM-GEN-77-00-00-ECTM-001",
+      "title": "Engine Condition Trend Monitoring and Fault Isolation",
+      "stage": "initial",
+      "path": "initial/AMM-GEN-77-00-00-ECTM-001.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Operator Powerplant Engineering (applies CFM International, IAE and Pratt & Whitney ECTM guidance)",
+      "effective_date": "2024-07-01",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4",
+        "V2527-A5",
+        "PW4077D"
+      ],
+      "subsystems": [
+        "fan",
+        "LPC",
+        "HPC",
+        "combustor",
+        "HPT",
+        "LPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-EASA-2024-0312",
+        "SB-CFM-56-72-0193",
+        "AMM-CFM56-7B-72-00-00-200-801",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-CFM56-72-21-00-200-801",
+        "AMM-CFM56-5B-72-22-00-200-801",
+        "AMM-CFM56-72-41-00-200-801",
+        "AMM-CFM56-72-54-00-200-801",
+        "AMM-V2500-72-00-00-200-802",
+        "AMM-V2500-72-41-00-200-801",
+        "AMM-V2500-72-51-00-200-801",
+        "AMM-V2500-72-54-00-200-801",
+        "AMM-PW4000-72-00-00-200-801",
+        "AMM-PW4000-72-31-00-200-801",
+        "AMM-PW4000-72-41-00-200-801",
+        "AMM-PW4000-72-21-00-200-801",
+        "AMM-PW4000-72-51-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 1296,
+      "sha256": "05a4ef10091fe45b36deeb4b6ad21952e8a1a1d66baa8f3b8e3ac26ca4146755"
+    },
+    {
+      "doc_id": "AMM-PW4000-72-00-00-200-801",
+      "title": "HPC Borescope Inspection and Labyrinth Seal Assessment",
+      "stage": "initial",
+      "path": "initial/AMM-PW4000-72-00-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2023-12-01",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [
+        "AMM-PW4000-72-00-00-200-801 Revision 31"
+      ],
+      "related": [
+        "AD-EASA-2023-1423",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-PW4000-72-31-00-200-801",
+        "AMM-PW4000-72-41-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 908,
+      "sha256": "557a725d32fbe57e910c98e5ee98d59f646f9428335e97dc4efa203c2a371b97"
+    },
+    {
+      "doc_id": "AMM-PW4000-72-21-00-200-801",
+      "title": "Fan Blade Inspection, Leading Edge Erosion Assessment and Root Lubrication",
+      "stage": "initial",
+      "path": "initial/AMM-PW4000-72-21-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2024-04-15",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "fan"
+      ],
+      "supersedes": [
+        "AMM-PW4000-72-21-00-200-801 Revision 23"
+      ],
+      "related": [
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-PW4000-72-00-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 898,
+      "sha256": "cc0dd65949f1e5b98f1b1fe686bcfc42f143963d316eada56dda886e9b56c222"
+    },
+    {
+      "doc_id": "AMM-PW4000-72-31-00-200-801",
+      "title": "LPC Variable Stator Vane Rigging Check (On Wing)",
+      "stage": "initial",
+      "path": "initial/AMM-PW4000-72-31-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2023-11-17",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "LPC"
+      ],
+      "supersedes": [
+        "AMM-PW4000-72-31-00-200-801 Revision 14"
+      ],
+      "related": [
+        "SB-PW-4000-72-0176",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-PW4000-72-00-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 763,
+      "sha256": "2b18942a7abb19f8fff16cc85c08db9bef24526bf2bd8b120f45a460359a9735"
+    },
+    {
+      "doc_id": "AMM-PW4000-72-41-00-200-801",
+      "title": "Combustor and Fuel Nozzle Borescope Inspection",
+      "stage": "initial",
+      "path": "initial/AMM-PW4000-72-41-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2024-03-20",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [
+        "AMM-PW4000-72-41-00-200-801 Revision 19"
+      ],
+      "related": [
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-PW4000-72-51-00-200-801",
+        "AMM-PW4000-72-00-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 862,
+      "sha256": "b78c253fd4359fb5ccd4f7808a213f170e01700f8b107a245362421599ce9015"
+    },
+    {
+      "doc_id": "AMM-PW4000-72-51-00-200-801",
+      "title": "HPT Stage 1 Tip Clearance Measurement and Shroud Inspection",
+      "stage": "initial",
+      "path": "initial/AMM-PW4000-72-51-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2023-09-22",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [
+        "AMM-PW4000-72-51-00-200-801 Revision 26"
+      ],
+      "related": [
+        "AD-FAA-2023-1889",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-PW4000-72-41-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 879,
+      "sha256": "052c959728671b4f48a686e112c6858ba320a243998c7401cfa569beb442445d"
+    },
+    {
+      "doc_id": "AMM-V2500-72-00-00-200-802",
+      "title": "HPC Borescope Inspection and In-Situ Labyrinth Seal Measurement",
+      "stage": "initial",
+      "path": "initial/AMM-V2500-72-00-00-200-802.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2023-12-01",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [
+        "AMM-V2500-72-00-00-200-802 Revision 22"
+      ],
+      "related": [
+        "AD-EASA-2023-1423",
+        "SB-IAE-V2500-A5-72-0103",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-V2500-72-41-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 940,
+      "sha256": "f4a69d6b45380761ff796f5fee8d69539ecc1d757cbd14ce89fb5fb61e9d8a20"
+    },
+    {
+      "doc_id": "AMM-V2500-72-41-00-200-801",
+      "title": "Combustor Liner and Fuel Injector Inspection",
+      "stage": "initial",
+      "path": "initial/AMM-V2500-72-41-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2024-02-09",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [
+        "AMM-V2500-72-41-00-200-801 Revision 18"
+      ],
+      "related": [
+        "AD-FAA-2024-0583",
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-V2500-72-51-00-200-801"
+      ],
+      "fleet_linked": true,
+      "words": 984,
+      "sha256": "4a260a31e8b3c0f8f642afdbbe685afb21deb6c53b17f13e331635b3f95aa78f"
+    },
+    {
+      "doc_id": "AMM-V2500-72-51-00-200-801",
+      "title": "HPT Stage 1 Blade and Nozzle Guide Vane Borescope Inspection",
+      "stage": "initial",
+      "path": "initial/AMM-V2500-72-51-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2023-10-05",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [
+        "AMM-V2500-72-51-00-200-801 Revision 12"
+      ],
+      "related": [
+        "SB-IAE-V2500-A5-72-0087",
+        "AMM-V2500-72-41-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 865,
+      "sha256": "b7dc2c911e8db175554545ae1b9a07cd6f2df9a133742cce24f7c68dab26883b"
+    },
+    {
+      "doc_id": "AMM-V2500-72-54-00-200-801",
+      "title": "LPT Borescope Inspection and Tip Seal Wear Assessment",
+      "stage": "initial",
+      "path": "initial/AMM-V2500-72-54-00-200-801.md",
+      "doc_type": "Engine Maintenance Manual Task",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2024-06-10",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "LPT"
+      ],
+      "supersedes": [
+        "AMM-V2500-72-54-00-200-801 Revision 9"
+      ],
+      "related": [
+        "AMM-GEN-77-00-00-ECTM-001",
+        "AMM-V2500-72-51-00-200-801",
+        "AMM-V2500-72-00-00-200-802"
+      ],
+      "fleet_linked": true,
+      "words": 862,
+      "sha256": "77f73c3fe3f70d8c472639ac2ef89b5eca5b40e856d3813db37bf26e2ab14994"
+    },
+    {
+      "doc_id": "SB-CFM-56-72-0193",
+      "title": "HPC Water Wash Optimisation",
+      "stage": "initial",
+      "path": "initial/SB-CFM-56-72-0193.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "CFM International",
+      "effective_date": "2024-02-14",
+      "engine_models": [
+        "CFM56-7B27",
+        "CFM56-5B4"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [
+        "SB-CFM-56-72-0141"
+      ],
+      "related": [
+        "AD-EASA-2024-0312",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-CFM56-7B-72-00-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1549,
+      "sha256": "1b36e707a62b9cc251854b0db26b8cf87df035709e41c111162a72426c457b22"
+    },
+    {
+      "doc_id": "SB-CFM-56-72-0228",
+      "title": "Fan Frame Strut Fatigue Inspection Enhancement",
+      "stage": "initial",
+      "path": "initial/SB-CFM-56-72-0228.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "CFM International",
+      "effective_date": "2024-05-19",
+      "engine_models": [
+        "CFM56-7B27"
+      ],
+      "subsystems": [
+        "fan"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-FAA-2024-1042",
+        "AMM-CFM56-72-21-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1112,
+      "sha256": "fc26cc460edca3a88c7d2caf90ae9bce879b872c9ed8baeed1a2ad47ede4884e"
+    },
+    {
+      "doc_id": "SB-GE-CF6-72-0451",
+      "title": "Fan Booster Stall Margin Enhancement and LPC Exit Guide Vane Modification",
+      "stage": "initial",
+      "path": "initial/SB-GE-CF6-72-0451.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "GE Aviation",
+      "effective_date": "2023-08-28",
+      "engine_models": [
+        "CF6-80C2"
+      ],
+      "subsystems": [
+        "fan",
+        "LPC"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-FAA-2024-1334"
+      ],
+      "fleet_linked": false,
+      "words": 518,
+      "sha256": "27c11eaeca460584d5d11448c2fb922c749433d01b165273ffdf08325dd0a1e5"
+    },
+    {
+      "doc_id": "SB-GE-GE90-72-0288",
+      "title": "LPT Stage 5-7 Airfoil Trailing Edge Modification for Efficiency Improvement",
+      "stage": "initial",
+      "path": "initial/SB-GE-GE90-72-0288.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "GE Aviation",
+      "effective_date": "2023-12-20",
+      "engine_models": [
+        "GE90-115B"
+      ],
+      "subsystems": [
+        "LPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "SB-GE-GE90-72-0312"
+      ],
+      "fleet_linked": false,
+      "words": 569,
+      "sha256": "d442e303f0d7a00bf70ad21a269c00e58ea428f148faf5cfc98b4f363a3db43a"
+    },
+    {
+      "doc_id": "SB-GE-GE90-72-0312",
+      "title": "Combustor Dome Assembly Replacement with Improved Design",
+      "stage": "initial",
+      "path": "initial/SB-GE-GE90-72-0312.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "GE Aviation",
+      "effective_date": "2024-03-07",
+      "engine_models": [
+        "GE90-115B"
+      ],
+      "subsystems": [
+        "combustor"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-FAA-2023-2156",
+        "SB-GE-GE90-72-0288"
+      ],
+      "fleet_linked": false,
+      "words": 557,
+      "sha256": "25e0d184be8272f250cb8ffa9f55c4d83d25fd9cf332f47f02406b7052506d3a"
+    },
+    {
+      "doc_id": "SB-IAE-V2500-A5-72-0087",
+      "title": "HPT Blade Thermal Barrier Coating Enhancement",
+      "stage": "initial",
+      "path": "initial/SB-IAE-V2500-A5-72-0087.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2023-10-05",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "AMM-V2500-72-51-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 799,
+      "sha256": "9f143d3ef48991315435787275587ee0756434bcfbfaa85ef84f1fc60b7397dd"
+    },
+    {
+      "doc_id": "SB-IAE-V2500-A5-72-0103",
+      "title": "HPC Stage 5-7 Blade Platform Repair and Coating Restoration",
+      "stage": "initial",
+      "path": "initial/SB-IAE-V2500-A5-72-0103.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "IAE International Aero Engines",
+      "effective_date": "2024-04-22",
+      "engine_models": [
+        "V2527-A5"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-EASA-2023-1423",
+        "AMM-V2500-72-00-00-200-802",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1021,
+      "sha256": "d4083fb3a145e7ede6feb4061f46595e27fbc87f1f1633bce601d53947124c87"
+    },
+    {
+      "doc_id": "SB-PW-4000-72-0176",
+      "title": "LPC Variable Stator Vane Adjustment and Clearance Verification",
+      "stage": "initial",
+      "path": "initial/SB-PW-4000-72-0176.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "Pratt & Whitney",
+      "effective_date": "2023-11-17",
+      "engine_models": [
+        "PW4077D"
+      ],
+      "subsystems": [
+        "LPC"
+      ],
+      "supersedes": [
+        "SB-PW-4000-72-0122"
+      ],
+      "related": [
+        "AMM-PW4000-72-31-00-200-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 819,
+      "sha256": "c0fdc7bdf16efd6158921ab3d2439828b13ee99c139197b124cad91c258393ce"
+    },
+    {
+      "doc_id": "SB-RR-TRENT700-72-0234",
+      "title": "LPT Tip Seal Upgrade to Reduced-Leakage Configuration",
+      "stage": "initial",
+      "path": "initial/SB-RR-TRENT700-72-0234.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "Rolls-Royce",
+      "effective_date": "2024-01-11",
+      "engine_models": [
+        "Trent 700"
+      ],
+      "subsystems": [
+        "LPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-EASA-2023-0891"
+      ],
+      "fleet_linked": false,
+      "words": 495,
+      "sha256": "5ce606da40737df0938628a48d93c79f37ad1edc4543f2ef1b9df396c46e1d98"
+    },
+    {
+      "doc_id": "SB-RR-TRENT700-72-0289",
+      "title": "HPT Disc Dovetail Slot Fretting Inspection and Mitigation",
+      "stage": "initial",
+      "path": "initial/SB-RR-TRENT700-72-0289.md",
+      "doc_type": "Service Bulletin",
+      "issuer": "Rolls-Royce",
+      "effective_date": "2024-06-30",
+      "engine_models": [
+        "Trent 700"
+      ],
+      "subsystems": [
+        "HPT"
+      ],
+      "supersedes": [],
+      "related": [
+        "AD-EASA-2024-0756"
+      ],
+      "fleet_linked": false,
+      "words": 579,
+      "sha256": "41ceeb44cc6384be6b33dbd60ae881ea4ba2badf8d4213a0582d9fe2275932e8"
+    },
+    {
+      "doc_id": "AD-EASA-2026-0214",
+      "title": "HPC Stage 1-4 Blade Tip Liberation: Repetitive Borescope and Blade Set Replacement",
+      "stage": "incremental",
+      "path": "incremental/AD-EASA-2026-0214.md",
+      "doc_type": "Airworthiness Directive (Emergency)",
+      "issuer": "European Union Aviation Safety Agency (EASA)",
+      "effective_date": "2026-10-27",
+      "engine_models": [
+        "CFM56-7B27"
+      ],
+      "subsystems": [
+        "HPC"
+      ],
+      "supersedes": [
+        "AD-EASA-2024-0312"
+      ],
+      "related": [
+        "AD-EASA-2024-0312",
+        "SB-CFM-56-72-0193",
+        "AMM-CFM56-7B-72-00-00-200-801",
+        "AMM-CFM56-72-00-00-100-801",
+        "AMM-GEN-77-00-00-ECTM-001"
+      ],
+      "fleet_linked": true,
+      "words": 1556,
+      "sha256": "1f180b3f3c875f793c44c157b23c9c436c067bc93959763c65569eaaea9b8963"
+    }
+  ]
+}

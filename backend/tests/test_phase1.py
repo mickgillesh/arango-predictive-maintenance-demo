@@ -1,5 +1,4 @@
 """Smoke tests for Phase 1 — run after `make load`."""
-import pytest
 
 from backend.db import get_db
 

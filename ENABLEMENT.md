@@ -1,0 +1,153 @@
+# Enablement Session Runbook — AutoGraph + AutoRAG on Arango
+
+**Goal:** the customer leaves knowing how to deploy AutoGraph and AutoRAG with the AI Suite
+SDK, how a generated knowledge graph and an existing structured graph are queried
+together, and how the generated graph is kept current with incremental updates.
+
+**Format:** about 90 minutes, driven by
+[`notebooks/aerofleet_autograph_autorag.ipynb`](notebooks/aerofleet_autograph_autorag.ipynb)
+on the platform notebook server of a fresh cluster. Answer key:
+[`corpus/QUESTIONS.md`](corpus/QUESTIONS.md).
+
+---
+
+## 1. Before the session (do a full dry run the day before)
+
+### Checklist
+
+- [ ] Fresh cluster with the AI Suite enabled; you can log in to the web UI.
+- [ ] Notebook server kernel is **Python 3.12+**: `import sys; sys.version`.
+- [ ] Notebook server can reach `github.com` (repo + SDK) and `data.nasa.gov` (C-MAPSS).
+      If NASA is blocked, upload `train_FD001.txt` to `data/` in the cloned repo.
+- [ ] A database user with permission to create databases (for `aerofleet_enablement`).
+- [ ] A user for `FPS_RECOVERY_USERNAME` with read/write on the database. The SDK does
+      not create it. Using the same user as `ARANGO_USER` is fine for a demo.
+- [ ] OpenAI API key with access to `gpt-4o` and `text-embedding-3-small`.
+- [ ] This branch pushed to GitHub, so the notebook can clone it.
+- [ ] Dry run of the whole notebook with a throwaway project. Note the timings for §5
+      and §8, which are the slow steps, and fill in the table below.
+
+### Verify on the cluster — record the outcomes
+
+These are platform behaviours the notebook checks rather than assumes. Write down the
+result of the dry run so there are no surprises live.
+
+| # | Question | Where checked | Result |
+|---|---|---|---|
+| 1 | Python version; GitHub and NASA reachable | §0, §1, §2 | |
+| 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
+| 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | |
+| 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | |
+| 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | |
+| 6 | `ingest(incremental=True)` accepts a new file in the already-built category | §8 (falls back to a new category) | |
+| 7 | `FPS_RECOVERY_USERNAME` accepted | §5 deploy | |
+
+Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 2`,
+`UNIFIED = 3`, `CUSTOM = 4`. Deep Search is **CUSTOM + `use_llm_planner: true`**, not
+`query_type` 3. Earlier scripts in this repo had this wrong.
+
+---
+
+## 2. Agenda
+
+| Time | Notebook | Topic |
+|---|---|---|
+| 0:00 | — | The problem: maintenance knowledge is split between operational data (which engine, which part, who) and documents (what the regulator and the OEM require). |
+| 0:10 | §0-§2 | The structured graph: load, score, one multi-hop traversal. |
+| 0:20 | §3-§4 | AI Suite projects, secret profiles, uploading a corpus by category. |
+| 0:25 | §5 | AutoGraph: corpus build → strategies (partitions) → orchestrate. Explore the generated graph. *Start the build, then talk through the corpus while it runs.* |
+| 0:45 | §6 | AutoRAG: LOCAL / GLOBAL / UNIFIED on document questions. |
+| 0:55 | §7 | Custom Retriever tools across both graphs; Deep Search. |
+| 1:10 | §8 | Incremental update: a new emergency AD arrives. Before / after. |
+| 1:25 | — | Q&A, how to apply this to their own data. |
+
+---
+
+## 3. Talking points
+
+### §2 Structured graph
+- Real NASA C-MAPSS telemetry; synthetic but deterministic operational data (seed 42).
+- The scorer turns sensor drift into a health index, a predicted remaining useful life and
+  **driver subsystems**. Those subsystems are what joins the fleet to the documents.
+- `Q_ENGINE_IMPACT` (backend/aql.py) is one AQL query that walks four edge types: the
+  aircraft, degrading subsystems, required parts with stock, and certified technicians at
+  the base.
+
+### §4 Corpus
+- 36 documents of three kinds: ADs (mandatory, from regulators), SBs (recommended, from
+  OEMs) and AMM task cards (procedures).
+- The documents name models, subsystems, sensors, part names, tools and other documents,
+  which gives AutoGraph shared entities to connect.
+- Distractor documents for engines the operator doesn't fly: retrieval must not answer from them.
+
+### §5 AutoGraph
+- **Category** is the second upload scope label. One category is one corpus here.
+- **Corpus build** links similar documents and clusters them.
+- **Strategize** chooses FullGraphRAG or VectorRAG per cluster. Each cluster becomes a
+  **partition** (`rag_partition_id`). Partitions are created by AutoGraph; you don't
+  assign them.
+- **Orchestrate** imports partitions; only stale partitions are re-imported later.
+- Show the relation types (`PART_OF`, `MENTIONED_IN`, `RELATED_TO`) and the graph in the
+  Graph Visualizer.
+
+### §6 AutoRAG
+- LOCAL for "what does X require", GLOBAL for themes, UNIFIED for mixed questions.
+- A6 (Trent 700 AD) shows the retriever separating fleet engines from distractors.
+
+### §7 Custom Retriever, the key idea
+- A tool is a **document**: a collection to search, a search mode (lexical, semantic or
+  hybrid with weights), an AQL expansion, and a natural-language description.
+- Tools can target **any collection**, including the structured fleet graph. That is how
+  existing operational data joins the RAG answer without being re-ingested.
+- Blocking parts are computed before the parts list is truncated, so a zero-stock part is
+  never hidden.
+- **Deep Search** lets an LLM planner pick tools by description and combine results.
+
+### §7 The `partition_id` question
+- **Before:** an earlier deployment copied the AutoGraph partition id onto every engine
+  and rebuilt the engine search index, so the retriever's automatic partition selection
+  would not drop structured results. It broke every time the fleet was reloaded.
+- **Now:** removed, as the technical team advised. The notebook proves it on this cluster
+  by checking for the critical engines' tail numbers in the answer. If needed, the
+  documented switch is `auto_select_partitions: false` on the request, not data changes.
+
+### §8 Incremental update
+- Scenario: EASA issues an emergency AD (`AD-EASA-2026-0214`) that supersedes
+  AD-EASA-2024-0312. It halves the interval to 50 cycles, widens the scope to stages 1-5,
+  requires inspection within 10 cycles for engines with an HPC trend alert, and requires
+  replacing the whole **HPC blade set stage 1-4** on any reject.
+- `ingest(..., incremental=True)` keeps the existing corpus: `documents_added == 1`,
+  everything else unchanged, and only affected partitions are re-imported.
+- Before: the answer cites the 2024 AD with a 100-cycle interval. After: it cites the 2026
+  AD and the new limits.
+- Deep Search after the update joins the new AD to the fleet. CFM56-7B27 engines with HPC
+  as a driver subsystem (engine 9 is critical) need inspection within 10 cycles, and the
+  HPC blade set stage 1-4 has **zero stock**.
+
+---
+
+## 4. Failure drills
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| `%pip install` of the SDK fails | No GitHub access, or kernel below Python 3.12 | Switch kernel; or `pip download` the SDK on a laptop and upload the wheel |
+| C-MAPSS download fails | NASA blocked | Upload `train_FD001.txt` to `data/` in the repo folder; re-run §2 |
+| `ensure_database()` permission error | User cannot create databases | Create `aerofleet_enablement` in the web UI; re-run |
+| AutoGraph deploy rejected | `FPS_RECOVERY_USERNAME` missing or without rights | Create the user / grant rw; re-run deploy |
+| §5 build very slow | LLM rate limits | Talk through the corpus and `QUESTIONS.md`; continue when done |
+| Tool queries return errors | Tools collection mismatch | The §7 check switches collection automatically; otherwise set `TOOLS_COLLECTION` |
+| Fleet tools return nothing | Partition selection | §7 retries with `auto_select_partitions: false`; if it still fails, stop and show the dry-run output |
+| `CategoryAlreadyBuiltError` in §8 | Service won't add to a built category | The cell falls back to a new category automatically |
+| Deep Search answer misses a fact | LLM planner variance | Run the single tools (B1, techdocs) to show the underlying data |
+
+---
+
+## 5. Honest framing
+
+- Telemetry is real (NASA C-MAPSS); aircraft, parts, technicians and documents are
+  synthetic but realistic. Document numbers follow real AD/SB/AMM conventions and are not
+  real directives.
+- The AI Suite SDK is pre-alpha (pinned to a commit in the notebook). Custom tools and Deep
+  Search are called over REST because the SDK doesn't expose them yet.
+- LLM answers vary between runs. The answer key lists the facts that must be present, not
+  exact wording.

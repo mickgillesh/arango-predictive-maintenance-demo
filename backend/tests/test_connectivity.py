@@ -1,7 +1,5 @@
 import os
 
-import pytest
-
 from backend.db import check_connection
 
 

@@ -1,263 +1,148 @@
-# AeroFleet — Predictive Maintenance Demo
+# AeroFleet — AutoGraph + AutoRAG Enablement
 
-A sales demo for the **ArangoDB Contextual Data Platform**, modelling a fleet operator
-managing 100 turbofan engines across five global maintenance bases. Real NASA C-MAPSS
-telemetry drives a deterministic health-index scorer. A synthetic operational graph
-connects each engine to its aircraft, subsystems, spare parts, technicians, and work
-orders. Users explore the fleet through a React dashboard, query it in natural language
-via an AI chat panel, and use an AI planning assistant to generate and refine a
-multi-engine maintenance schedule.
+> **Branch `ai-suite-enablement`.** This is a stripped-down AeroFleet demo for a hands-on
+> enablement session on the **Arango AI Suite**. The full sales demo (maintenance planner,
+> natural-language chat, container deployment) lives on `main`.
 
-**Narrative: Predict → Understand → Ask → Plan**
+The session shows the shape of a solution that answers questions over **two graphs at once**:
 
----
-
-## Screens
-
-| Screen | What it shows | Core demo point |
+| Graph | Source | Built by |
 |---|---|---|
-| Fleet Overview | Health dashboard for all 100 engines; critical / warning / healthy KPI tiles | Spot at-risk engines before a grounding event |
-| Engine Detail | Sensor trends for 14 drifting channels + full engine metadata | Understand *why* an engine is degrading |
-| Impact Explorer | Affected aircraft, degrading subsystems, blocking parts, qualified technicians — one AQL traversal | Multi-hop graph answers "what breaks?" and "who can fix it?" in a single query |
-| Chat (always-on) | Natural-language questions answered with live AQL, shown in a collapsible panel | Non-technical users explore the graph without writing a query |
-| Planning Dashboard | AI-generated maintenance schedule: Gantt chart by technician, work order table, clickable work order drawer, planning chat assistant | End-to-end from prediction to executable plan; constrained AI planning with bi-temporal assignment history |
+| **Structured fleet graph** (`fleetGraph`) | NASA C-MAPSS telemetry + deterministic synthetic operations data | `pipeline/` (load → score → embed) |
+| **Generated knowledge graph** | 37 engine maintenance documents in `corpus/` | **AutoGraph** |
+
+**AutoRAG** answers document questions; **Custom Retriever tools** reach into both graphs;
+**Deep Search** plans across all tools. A held-back emergency directive demonstrates an
+**incremental AutoGraph update**.
+
+Start here: **[ENABLEMENT.md](ENABLEMENT.md)** (session runbook) and
+**[notebooks/aerofleet_autograph_autorag.ipynb](notebooks/aerofleet_autograph_autorag.ipynb)**.
 
 ---
 
-## Architecture
+## Repository layout
 
 ```
-NASA C-MAPSS FD001 dataset
-        │
-        ▼
-pipeline/loader.py        ──► ArangoDB cloud (aerofleet-demo)
-pipeline/synthetic_graph.py    8 vertex collections, 9 edge collections,
-                               named graph fleetGraph
-pipeline/scorer.py        ──► health index + predictedRUL written back to engines
-
-backend/app.py (FastAPI)
-  ├── GET  /api/fleet                      fleet list with risk KPI tiles
-  ├── GET  /api/engines/{id}               full engine document
-  ├── GET  /api/engines/{id}/readings      sensor time-series (C-MAPSS)
-  ├── GET  /api/engines/{id}/impact        multi-hop graph traversal (4 edge types)
-  ├── GET  /api/health                     service health check
-  ├── GET  /api/suggestions                preset demo questions for chat panel
-  ├── POST /api/ask                        natural language → AQL → answer
-  ├── POST /api/plan/run                   generate AI maintenance schedule (SSE)
-  ├── POST /api/plan/reset                 wipe generated work orders
-  ├── GET  /api/plan/work-orders           fetch current planned work orders + schedule
-  ├── GET  /api/plan/schedule-at?t=<unix>  historical schedule snapshot (bi-temporal)
-  ├── POST /api/plan/chat                  planning assistant conversation (SSE)
-  └── POST /api/plan/apply-edits           apply confirmed changes to ArangoDB
-
-AI components
-  ├── Chat panel — LangChain ArangoGraphQAChain (GPT-4o)
-  │     Introspects live DB schema; generates + executes read-only AQL
-  └── Planning assistant — LangGraph ReAct agent (GPT-4o)
-        Tools: query_ontology, read_graph, get_work_orders,
-               find_eligible_technicians, check_technician_availability,
-               propose_reassign_work_order, propose_update_entity,
-               propose_delete_entity, propose_create/delete_relationship
-        Pattern: propose → user confirms → apply-edits writes to DB
-
-frontend/ (React + TypeScript strict)
-  ├── /                   Fleet Overview
-  ├── /engines/:id        Engine Detail
-  ├── /engines/:id/impact Impact Explorer
-  └── /plan               Planning Dashboard
-       ├── Gantt chart (technician × time; bars clickable → work order drawer)
-       ├── Work order table (rows clickable → work order drawer)
-       └── Planning chat assistant with Pending Changes panel
+corpus/
+  initial/                 36 Markdown docs: 10 ADs, 10 SBs, 16 AMM task cards
+  incremental/             AD-EASA-2026-0214 — held back for the incremental-update demo
+  MANIFEST.json            generated: doc ids, models, subsystems, cross-refs, word counts, hashes
+  QUESTIONS.md             demo questions + answer key
+notebooks/
+  aerofleet_autograph_autorag.ipynb   end-to-end session notebook (runs on the platform)
+  nb_helpers.py            REST helper for custom tools / Deep Search, display helpers
+pipeline/
+  download_data.py         NASA C-MAPSS FD001 download
+  synthetic_graph.py       deterministic operational graph (seed 42)
+  loader.py                creates collections + fleetGraph (destructive, "aerofleet" DBs only)
+  scorer.py, scorer_runner.py   health index → predicted RUL, risk bucket, driver subsystems
+  embed_runner.py          technician notes + embeddings on engines (for a custom tool)
+  corpus.py                corpus parsing + MANIFEST.json build/check
+  retriever_tools.py       Custom Retriever tool definitions (2 per graph)
+backend/                   FastAPI: fleet, engine, impact, health endpoints; all AQL in aql.py
+frontend/                  React: Fleet Overview, Engine Detail, Impact Explorer
+scripts/                   check_connection.py, setup_retriever.py, strip_notebook.py
 ```
 
 ---
 
-## Data sources
+## The maintenance corpus
 
-### NASA C-MAPSS FD001
+Hand-written, realistic documents for the four engine models in the fleet
+(CFM56-7B27, CFM56-5B4, V2527-A5, PW4077D) plus a few for engines the operator does *not*
+fly (Trent 700, GE90-115B, CF6-80C2) as retrieval distractors.
 
-20,631 rows of simulated turbofan telemetry from 100 engines. Each row is one
-flight cycle with 21 sensor readings and 3 operational-setting channels. The
-dataset records degradation from a healthy state through to failure, making it
-ideal for remaining-useful-life (RUL) modelling.
+| Type | Count | Content |
+|---|---|---|
+| Airworthiness Directives (ADs) | 10 (+1 held back) | Applicability, unsafe condition, compliance times, mandatory actions, limits, parts/tools, cost, background |
+| Service Bulletins (SBs) | 10 | Recommended actions, limits, parts, planning information, background |
+| AMM task cards | 16 | Set-up, procedure, limits tables, fault isolation from trend data, service experience |
 
-Source: NASA Prognostics Data Repository — CMAPSS Jet Engine Simulated Data.
+Documents link to the fleet graph only through **engine model** and **subsystem**
+(fan, LPC, HPC, combustor, HPT, LPT), and reference each other through a
+`**Related Documents:**` header, which gives AutoGraph shared entities to connect.
+The fleet-wide trend-monitoring card (`AMM-GEN-77-00-00-ECTM-001`) maps the same
+C-MAPSS sensors the scorer uses (T24, T30, T50, Ps30, phi, W31, W32, …) to subsystems.
 
-### Synthetic operational graph
+After editing any document, run `uv run python -m pipeline.corpus --write` to refresh
+`MANIFEST.json`. `make test` fails if the manifest is stale.
 
-Generated deterministically (seed=42) to wrap each engine in a realistic
-operational context across five bases: **LHR, JFK, SIN, DXB, FRA**.
+---
+
+## Structured fleet graph
 
 | Vertex collection | Count | Description |
 |---|---|---|
-| `engines` | 100 | Turbofan engines with health scores and predicted RUL |
-| `aircraft` | 50 | Airframes; 2 engines per aircraft |
-| `subsystems` | 600 | 6 subsystem types per engine (fan, LPC, HPC, HPT, LPT, combustor) |
-| `sensors` | 2,100 | 21 sensors per engine, mapped to their monitored subsystem |
-| `parts` | 39 | Spare parts catalogue; some zero-stock (blocking), some in-stock |
-| `technicians` | 10 | Maintenance staff with subsystem certifications; 2 per base |
-| `workOrders` | 200 + planner | 200 historical closed WOs; planner adds procurement + maintenance WOs |
+| `engines` | 100 | Health index, predicted RUL, risk bucket, driver subsystems, technician notes + embedding |
+| `aircraft` | 50 | Tail number and base (LHR, JFK, SIN, DXB, FRA); 2 engines each |
+| `subsystems` | 600 | fan, LPC, HPC, combustor, HPT, LPT per engine |
+| `sensors` | 2,100 | 21 C-MAPSS channels per engine, mapped to subsystems (`pipeline/MAPPING.md`) |
+| `parts` | 39 | Spare parts with stock level and lead time; zero stock = blocking |
+| `technicians` | 10 | Home base + subsystem certifications |
+| `workOrders` | 200 | Historical closed work orders |
+| `readings` | 20,631 | Raw telemetry (not in the named graph) |
 
-| Edge collection | Direction | Meaning |
-|---|---|---|
-| `installedOn` | engine → aircraft | Engine is installed on an airframe |
-| `partOf` | subsystem → engine | Subsystem belongs to an engine |
-| `monitors` | sensor → subsystem | Sensor measures a subsystem |
-| `requiredBy` | part → subsystem | Spare part is required by a subsystem type |
-| `certifiedFor` | technician → subsystem | Technician holds certification for a subsystem at their base |
-| `maintains` | workOrder → engine | Work order covers an engine |
-| `performedBy` | workOrder → technician | Work order assigned to a technician (bi-temporal — see below) |
-| `consumed` | workOrder → part | Work order consumes a spare part |
-
-The named graph `fleetGraph` spans all 8 operational edge collections.
-
----
-
-## Health scoring
-
-The health index scorer (`pipeline/scorer.py`) computes a 0–1 score per engine from the
-14 drifting sensor channels using exponential drift saturation:
-
-- **DRIFT_SATURATION = 12.5 σ** — a sensor reading this far from its per-engine baseline is counted as fully degraded.
-- **Warning threshold = 0.62** — engines below this are flagged as warning.
-- **Critical threshold** — derived from the predictedRUL distribution; engines with very low RUL are marked critical.
-
-Typical distribution across 100 engines: ~3 critical / ~10 warning / ~87 healthy.
-
----
-
-## AI planning assistant
-
-The Planning Dashboard generates a complete maintenance schedule for all critical and
-warning engines, then lets a conversational assistant refine it.
-
-### Plan generation
-
-`POST /api/plan/run` streams a LangGraph ReAct agent that:
-
-1. Reads fleet context (engines, parts, technicians) via AQL.
-2. For each at-risk engine, creates `procurement` work orders (if blocking parts exist)
-   and `maintenance` work orders, scheduling them serially with no technician overlap.
-3. Assigns technicians by base and certification match.
-4. Writes work orders and bi-temporal `performedBy` edges to ArangoDB.
-
-Work orders are scheduled in working hours (Mon–Fri, 08:00–16:00) from today.
-
-### Bi-temporal assignment history
-
-`performedBy` edges carry `validFrom` and `validTo` (Unix seconds). Reassignment
-**never deletes** the old edge — it sets `validTo = now` on the old record and inserts
-a new edge. This means:
-
-- **"Who is assigned to WO X right now?"** — filter `validTo > now`
-- **"Who was assigned at time T?"** — filter `validFrom <= T AND validTo > T`
-- `GET /api/plan/schedule-at?t=<unix>` replays the schedule at any point in the past
-
-### Planning assistant tools
-
-The planning assistant enforces hard constraints automatically — the LLM cannot bypass them:
-
-| Tool | Purpose |
+| Edge collection | Direction |
 |---|---|
-| `find_eligible_technicians(wo_key)` | Returns only technicians at the correct base with a matching certification |
-| `check_technician_availability(tech_key)` | Returns the technician's current schedule slots |
-| `propose_reassign_work_order(wo_key, new_tech_key)` | Validates base, cert, and schedule overlap; expires old edge, creates new one |
-| `propose_update_entity(...)` | Stage a field change on any entity |
-| `propose_delete_entity(...)` | Stage a cascade delete (aircraft, engine, WO) |
-| `query_ontology()` | Inspect allowed operations and editable fields |
-| `read_graph(aql)` | Read-only AQL execution |
+| `installedOn` | engine → aircraft |
+| `partOf` | subsystem → engine |
+| `monitors` | sensor → subsystem |
+| `requiredBy` | part → subsystem |
+| `certifiedFor` | technician → subsystem |
+| `maintains` | workOrder → engine |
+| `performedBy` | workOrder → technician |
+| `consumed` | workOrder → part |
 
-All `propose_*` tools return a pending proposal — **no DB write occurs until the user
-confirms** in the Pending Changes panel.
+Health scoring (`pipeline/scorer.py`) turns sensor drift into a 0–1 health index and a
+predicted RUL; the sensors with the largest drift become the engine's **driver
+subsystems**. With default settings the fleet has 3 critical engines (48, 9, 51).
 
 ---
 
-## Setup
+## Custom Retriever tools
 
-### Prerequisites
+Defined in `pipeline/retriever_tools.py`, AQL in `backend/aql.py`.
 
-- Python 3.11+ with [uv](https://docs.astral.sh/uv/)
-- Node.js 20+ with npm
-- ArangoDB cloud instance (3.12+) with a database whose name contains `aerofleet`
-- OpenAI API key (GPT-4o)
+| Tool | Graph | Search | Expansion |
+|---|---|---|---|
+| `aerofleet_techdocs_v2` | generated | hybrid on chunks | chunk → source document |
+| `aerofleet_kg_entities_v1` | generated | hybrid on entities | mentions + related entities |
+| `aerofleet_fleet_engine_v2` | structured | hybrid on model + technician notes | aircraft, degrading subsystems, parts (blocking first), technicians at base, recent work orders |
+| `aerofleet_fleet_status_v5` | structured | lexical on risk bucket | same expansion, critical/warning only |
 
-### 1. Clone and install
+Earlier versions copied the AutoGraph `partition_id` onto every engine document so the
+retriever's partition selection would not filter structured results out. That workaround
+has been removed; notebook §7 verifies the result on the cluster and falls back to
+`auto_select_partitions: false` if needed.
+
+---
+
+## Running it
+
+**On the platform (the session):** follow [ENABLEMENT.md](ENABLEMENT.md). The notebook
+clones this branch, loads the structured graph, and does everything else.
+
+**On a laptop (preparation, the web app):**
 
 ```bash
-git clone <repo>
-cd arango-predictive-maintenance-demo
-uv sync                      # Python deps
+uv sync --extra dev
 cd frontend && npm install && cd ..
+cp .env.example .env.local     # fill in ARANGO_*, OPENAI_API_KEY
+make check                     # connectivity
+make reset                     # load + score + embed (destructive; DB name must contain "aerofleet")
+make dev                       # API on :8000, UI on :5173
+make test                      # pytest + frontend build
+make tools                     # re-register retriever tools (needs PROJECT_NAME)
 ```
 
-### 2. Configure environment
-
-```bash
-cp .env.example .env.local
-# Edit .env.local:
-#   ARANGO_URL        ArangoDB instance URL (e.g. https://xxx.arangodb.cloud:8529)
-#   ARANGO_DB         Database name (must contain "aerofleet")
-#   ARANGO_USER       Database username
-#   ARANGO_PASSWORD   Database password
-#   OPENAI_API_KEY    OpenAI key
-#   OPENAI_MODEL      Optional — default: gpt-4o
-#   FORCED_CRITICAL   Optional — comma-separated engine IDs to pin as critical
-```
-
-### 3. Load data
-
-```bash
-make load    # downloads C-MAPSS, generates synthetic graph, writes to ArangoDB
-make score   # computes health scores, writes predictedRUL back to engines
-# Shorthand: make reset  (runs both)
-```
-
-### 4. Run
-
-```bash
-make dev     # FastAPI on :8000 + Vite dev server on :5173 (with API proxy)
-```
-
-Open `http://localhost:5173`.
-
-For production-style single-process serving:
-
-```bash
-cd frontend && npm run build && cd ..
-uvicorn backend.app:app --host 0.0.0.0 --port 8000
-# Served at http://localhost:8000
-```
-
-### 5. Test
-
-```bash
-make test    # pytest + frontend TypeScript build check
-```
-
----
-
-## Environment variables
-
-| Variable | Required | Description |
+| Variable | Used by | Purpose |
 |---|---|---|
-| `ARANGO_URL` | Yes | ArangoDB instance URL |
-| `ARANGO_DB` | Yes | Database name (must contain `aerofleet`) |
-| `ARANGO_USER` | Yes | Database username |
-| `ARANGO_PASSWORD` | Yes | Database password |
-| `OPENAI_API_KEY` | Yes | OpenAI key for both AI features |
-| `OPENAI_MODEL` | No | Model name (default: `gpt-4o`) |
-| `FORCED_CRITICAL` | No | Comma-separated engine IDs pinned to critical risk (useful for demos) |
+| `ARANGO_URL`, `ARANGO_DB`, `ARANGO_USER`, `ARANGO_PASSWORD` | everything | Database connection |
+| `OPENAI_API_KEY` | embed, notebook | Note embeddings; AI Suite secret profiles |
+| `CHAT_MODEL`, `EMBEDDING_MODEL` | notebook, embed | Must match between `make embed` and AutoRAG |
+| `PROJECT_NAME` | notebook, `make tools` | AutoGraph project (auto-generated per run if unset) |
+| `FPS_RECOVERY_USERNAME` | notebook | AutoGraph File Parser recovery user |
+| `TOOLS_COLLECTION` | notebook, `make tools` | Override the Tools collection (default `{project}_Tools`) |
+| `FORCED_CRITICAL` | scorer | Pin engine ids to critical for rehearsals |
 
-Without `OPENAI_API_KEY` the app runs; the chat panel shows "not configured" and
-the planning assistant is disabled.
-
----
-
-## Project conventions
-
-- All AQL queries are bind-parameterised and live in `backend/aql.py`. No string interpolation of user input anywhere.
-- Data generation is deterministic (seed=42). Output must not change across runs.
-- Loader safety: destructive operations are guarded to databases whose name contains `aerofleet`.
-- No secrets in the repository. All config via environment variables mirrored in `.env.example`.
-- Python: ruff-clean, type hints on all public functions.
-- Frontend: TypeScript strict mode.
+See [CLAUDE.md](CLAUDE.md) for project conventions.

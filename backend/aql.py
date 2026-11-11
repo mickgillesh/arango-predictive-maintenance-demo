@@ -145,303 +145,177 @@ RETURN {
 Q_HEALTH_CHECK = "RETURN { db: 'ok', version: VERSION() }"
 
 # ---------------------------------------------------------------------------
-# Maintenance planner — read queries
+# Technician-note embeddings (pipeline/embed_runner.py)
 # ---------------------------------------------------------------------------
 
-Q_PLAN_FLEET_CONTEXT = """
+Q_EMBED_COUNT_EMBEDDED = """
 FOR e IN engines
-  FILTER e.riskBucket IN ["critical", "warning"]
-  LET ac = FIRST(FOR a IN 1..1 OUTBOUND e installedOn RETURN a)
-  LET subs = (
-    FOR sub IN 1..1 INBOUND e partOf
-      FILTER sub.name IN e.driverSubsystems
-      RETURN sub
+  FILTER HAS(e, 'notesEmbedding')
+  COLLECT WITH COUNT INTO n
+  RETURN n
+"""
+
+# SORT is required for determinism: embed_runner consumes a seeded RNG in this
+# order, so an unordered scan would assign different notes on different runs.
+Q_EMBED_ENGINES_FOR_NOTES = """
+FOR e IN engines
+  SORT TO_NUMBER(e._key)
+  RETURN KEEP(e, ['_key', 'model', 'entryIntoService',
+                  'healthIndex', 'riskBucket', 'driverSensors', 'driverSubsystems'])
+"""
+
+# ---------------------------------------------------------------------------
+# Loader fallback when the platform forbids dropping the named graph.
+# Bind params: @@coll (collection name)
+# ---------------------------------------------------------------------------
+
+Q_CLEAR_COLLECTION = "FOR doc IN @@coll REMOVE doc IN @@coll"
+
+# ---------------------------------------------------------------------------
+# Custom Retriever tool templates (AI Suite GraphRAG Retriever, query_type 4)
+#
+# These are NOT run by this app. pipeline/retriever_tools.py stores them in the
+# Retriever's Tools collection; the Retriever runs them in stage 2 ("AQL graph
+# expansion") of its custom-retriever pipeline:
+#   1. search  — lexical / semantic / hybrid search over the tool's collection
+#   2. expand  — this AQL, with @nodes = the _ids found in stage 1
+#   3. cite    — the Retriever formats the returned rows (and citations)
+# @nodes and @@relations_collection are supplied by the Retriever; every other
+# bind parameter has a default in the tool's config.aql_config.bind_params.
+# ---------------------------------------------------------------------------
+
+# Unstructured docs: AutoGraph chunk -> PART_OF -> source document.
+Q_TOOL_TECHDOCS = """
+LET nodes = @nodes
+FOR nodeId IN nodes
+  LET chunk = DOCUMENT(nodeId)
+  FILTER chunk != null
+  LET source_doc = FIRST(
+    FOR e IN @@relations_collection
+      FILTER e._from == chunk._id AND e.type == "PART_OF"
+      LET doc = DOCUMENT(e._to)
+      FILTER doc != null
+      RETURN doc
   )
-  LET parts = (
-    FOR sub IN subs
-      FOR p IN 1..1 INBOUND sub requiredBy
-        RETURN DISTINCT {
-          id: p._key, name: p.name, subsystemType: p.subsystemType,
-          stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
-          blocking: p.stockLevel == 0
-        }
-  )
-  LET certified_keys = (
-    FOR sub IN subs
-      FOR t IN 1..1 INBOUND sub certifiedFor
-        FILTER t.homeBase == ac.base
-        RETURN DISTINCT t._key
-  )
-  LET techs = (
-    FOR t IN technicians
-      FILTER t.homeBase == ac.base
-      RETURN {
-        id: t._key, name: t.name, homeBase: t.homeBase,
-        certifications: t.certifications,
-        canServiceDegradingSubs: t._key IN certified_keys
-      }
-  )
-  SORT e.riskBucket ASC, e.predictedRUL ASC
-  LIMIT 30
   RETURN {
-    id: e._key, riskBucket: e.riskBucket, predictedRUL: e.predictedRUL,
-    driverSubsystems: e.driverSubsystems,
-    aircraft: { tailNumber: ac.tailNumber, base: ac.base, flightsPerDay: ac.flightsPerDay },
-    parts: parts, technicians: techs
+    content:  chunk.content,
+    title:    source_doc.title,
+    filename: source_doc.filename,
+    doc_meta: source_doc
   }
 """
 
-Q_PLAN_WORK_ORDERS = """
-FOR wo IN workOrders
-  FILTER wo.generatedByPlanner == true
-  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
-  LET tech = FIRST(
-    FOR t, e IN 1..1 OUTBOUND wo performedBy
-      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
-      SORT e.validFrom DESC
-      RETURN t
+# AutoGraph knowledge graph: entity -> MENTIONED_IN chunks, entity -> RELATED_TO
+# entities. Shows the generated graph itself rather than only the text chunks.
+Q_TOOL_KG_ENTITIES = """
+LET nodes = @nodes
+FOR n IN nodes
+  LET entity = DOCUMENT(n)
+  FILTER entity != null
+  LET entity_chunks = (
+    FOR e IN @@relations_collection
+      FILTER e._from == entity._id AND e.type == "MENTIONED_IN"
+      LIMIT @max_chunks
+      LET chunk = DOCUMENT(e._to)
+      FILTER chunk != null
+      RETURN { content: chunk.content, chunk_id: chunk._key }
   )
-  LET parts = (
-    FOR p IN 1..1 OUTBOUND wo consumed
+  LET related_entities = (
+    FOR e IN @@relations_collection
+      FILTER e._from == entity._id AND e.type == "RELATED_TO"
+      LIMIT @max_related
+      LET related = DOCUMENT(e._to)
+      FILTER related != null
       RETURN {
-        id: p._key, name: p.name, subsystemType: p.subsystemType,
-        stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
-        blocking: p.stockLevel == 0
+        entity_name: related.entity_name,
+        description: related.description,
+        relationship: e.description
       }
   )
-  LET dependsOnWO = FIRST(
-    FOR dep IN 1..1 OUTBOUND wo dependsOn
-      RETURN { key: dep._key, type: dep.type, status: dep.status }
-  )
-  LET blockedByThis = (
-    FOR dep IN 1..1 INBOUND wo dependsOn
-      RETURN { key: dep._key, type: dep.type, status: dep.status }
-  )
-  SORT wo.deadline ASC
-  RETURN MERGE(wo, {
-    engine:       { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
-    technician:   { id: tech._key, name: tech.name, homeBase: tech.homeBase },
-    parts:        parts,
-    dependsOn:    dependsOnWO,
-    blockedByThis: blockedByThis
-  })
-"""
-
-# Same query without dependsOn traversal — used when the collection doesn't exist yet
-# (test DBs and databases that haven't had `make load` run since the edge was added).
-Q_PLAN_WORK_ORDERS_NO_DEPENDS = """
-FOR wo IN workOrders
-  FILTER wo.generatedByPlanner == true
-  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
-  LET tech = FIRST(
-    FOR t, e IN 1..1 OUTBOUND wo performedBy
-      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
-      SORT e.validFrom DESC
-      RETURN t
-  )
-  LET parts = (
-    FOR p IN 1..1 OUTBOUND wo consumed
-      RETURN {
-        id: p._key, name: p.name, subsystemType: p.subsystemType,
-        stockLevel: p.stockLevel, leadTimeDays: p.leadTimeDays,
-        blocking: p.stockLevel == 0
-      }
-  )
-  SORT wo.deadline ASC
-  RETURN MERGE(wo, {
-    engine:       { id: eng._key,  riskBucket: eng.riskBucket,  predictedRUL: eng.predictedRUL },
-    technician:   { id: tech._key, name: tech.name, homeBase: tech.homeBase },
-    parts:        parts,
-    dependsOn:    null,
-    blockedByThis: []
-  })
-"""
-
-# Same query at an arbitrary point in time (bind param @t = Unix seconds).
-Q_PLAN_WORK_ORDERS_AT_TIME = """
-FOR wo IN workOrders
-  FILTER wo.generatedByPlanner == true
-  LET eng  = FIRST(FOR e IN 1..1 OUTBOUND wo maintains RETURN e)
-  LET tech = FIRST(
-    FOR t, e IN 1..1 OUTBOUND wo performedBy
-      FILTER e.validFrom <= @t AND (e.validTo == null OR e.validTo > @t)
-      SORT e.validFrom DESC
-      RETURN t
-  )
-  FILTER tech != null
-  SORT wo.deadline ASC
-  RETURN MERGE(wo, {
-    engine:     { id: eng._key, riskBucket: eng.riskBucket, predictedRUL: eng.predictedRUL },
-    technician: { id: tech._key, name: tech.name, homeBase: tech.homeBase }
-  })
-"""
-
-Q_PLAN_COLLECT_IDS = """
-FOR wo IN workOrders FILTER wo.generatedByPlanner == true RETURN wo._id
-"""
-
-# Mutating queries — only executed by the reset endpoint, never via the LangChain chain.
-Q_PLAN_DELETE_MAINTAINS = (
-    "FOR e IN maintains   FILTER e._from IN @ids REMOVE e IN maintains"
-)
-Q_PLAN_DELETE_PERFORMED = (
-    "FOR e IN performedBy FILTER e._from IN @ids REMOVE e IN performedBy"
-)
-Q_PLAN_DELETE_CONSUMED = (
-    "FOR e IN consumed    FILTER e._from IN @ids REMOVE e IN consumed"
-)
-Q_PLAN_DELETE_DEPENDS_ON = (
-    "FOR e IN dependsOn FILTER e._from IN @ids REMOVE e IN dependsOn"
-)
-Q_PLAN_DELETE_WOS = (
-    "FOR wo IN workOrders FILTER wo.generatedByPlanner == true REMOVE wo IN workOrders"
-)
-
-# ---------------------------------------------------------------------------
-# Chat agent — ontology + cascade AQL
-# ---------------------------------------------------------------------------
-
-Q_ONTOLOGY_FULL = """
-LET nodes = (FOR n IN ontologyNodes RETURN n)
-LET edges = (FOR e IN ontologyEdges RETURN e)
-RETURN { nodes: nodes, edges: edges }
-"""
-
-Q_CHAT_WO_BY_ENGINE = """
-FOR wo IN workOrders
-  FILTER wo.generatedByPlanner == true AND wo.engineId == @eid
-  LET tech = FIRST(
-    FOR t, e IN 1..1 OUTBOUND wo performedBy
-      FILTER e.validTo == null OR e.validTo > DATE_NOW() / 1000
-      SORT e.validFrom DESC
-      RETURN t
-  )
-  RETURN MERGE(wo, {technician: tech})
-"""
-
-# Technician's currently-valid work orders (for availability checks).
-# Bind params: @tech_key (string), @now (Unix seconds int).
-Q_TECH_CURRENT_SCHEDULE = """
-FOR wo IN workOrders
-  FILTER wo.generatedByPlanner == true
-  FOR t, e IN 1..1 OUTBOUND wo performedBy
-    FILTER t._key == @tech_key
-    FILTER e.validTo == null OR e.validTo > @now
-    RETURN {
-      woKey: wo._key, engineId: wo.engineId, type: wo.type,
-      scheduledHourStart: wo.scheduledHourStart,
-      estimatedHours: wo.estimatedHours, status: wo.status
-    }
-"""
-
-# Full context for a single work order — needed before proposing a reassignment.
-# Bind params: @wo_key (string), @now (Unix seconds int).
-Q_WO_REASSIGN_CONTEXT = """
-LET wo = DOCUMENT(CONCAT('workOrders/', @wo_key))
-FILTER wo != null
-LET eng = DOCUMENT(CONCAT('engines/', wo.engineId))
-LET ac  = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
-LET cur_tech = FIRST(
-  FOR t, e IN 1..1 OUTBOUND wo performedBy
-    FILTER e.validTo == null OR e.validTo > @now
-    SORT e.validFrom DESC
-    RETURN { id: t._key, name: t.name, homeBase: t.homeBase }
-)
-RETURN {
-  wo:          KEEP(wo, ['_key','type','status','scheduledHourStart','estimatedHours','engineId','description']),
-  engine:      KEEP(eng, ['_key','driverSubsystems','riskBucket']),
-  aircraft:    { tailNumber: ac.tailNumber, base: ac.base },
-  currentTech: cur_tech
-}
-"""
-
-# Technicians eligible to take a specific work order: same base + overlapping cert.
-# Bind params: @wo_key (string), @now (Unix seconds int).
-Q_ELIGIBLE_TECHNICIANS_FOR_WO = """
-LET wo  = DOCUMENT(CONCAT('workOrders/', @wo_key))
-LET eng = DOCUMENT(CONCAT('engines/', wo.engineId))
-LET ac  = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
-LET eligible = (
-  FOR t IN technicians
-    FILTER t.homeBase == ac.base
-    LET matching = INTERSECTION(t.certifications, eng.driverSubsystems)
-    FILTER LENGTH(matching) > 0
-    LET wos = (
-      FOR w, e IN 1..1 INBOUND t performedBy
-        FILTER w.generatedByPlanner == true
-        FILTER e.validTo == null OR e.validTo > @now
-        RETURN { woKey: w._key, scheduledHourStart: w.scheduledHourStart,
-                 estimatedHours: w.estimatedHours }
-    )
-    RETURN {
-      key: t._key, name: t.name, homeBase: t.homeBase,
-      certifications: t.certifications, matchingCerts: matching,
-      currentWorkOrders: LENGTH(wos), schedule: wos
-    }
-)
-RETURN {
-  wo_key: @wo_key,
-  engineId: wo.engineId,
-  driverSubsystems: eng.driverSubsystems,
-  base: ac.base,
-  eligible: eligible
-}
-"""
-
-# Expire all currently-valid performedBy edges for a work order.
-# Bind params: @wo_id (full doc ID e.g. "workOrders/PLN-abc"), @now (Unix seconds int).
-Q_EXPIRE_PERFORMED_BY = """
-FOR e IN performedBy
-  FILTER e._from == @wo_id
-  FILTER e.validTo == null OR e.validTo > @now
-  UPDATE e WITH { validTo: @now } IN performedBy
-"""
-
-# Cascade delete helpers — bind-parameterised, called from planning._cascade_delete
-
-Q_CASCADE_WO_KEYS_FOR_ENGINES = """
-FOR wo IN workOrders FILTER wo.engineId IN @engine_keys RETURN wo._key
-"""
-
-Q_CASCADE_ENGINES_FOR_AIRCRAFT = """
-FOR e IN 1..1 INBOUND @aircraft_id installedOn RETURN { key: e._key }
-"""
-
-# @@coll is bound by "@coll" in bind_vars — e.g. {"@coll": "maintains", "ids": [...]}
-Q_CASCADE_DELETE_EDGES_FROM_IDS = (
-    "FOR e IN @@coll FILTER e._from IN @ids REMOVE e IN @@coll"
-)
-Q_CASCADE_DELETE_EDGES_FROM_ID = (
-    "FOR e IN @@coll FILTER e._from == @id REMOVE e IN @@coll"
-)
-Q_CASCADE_DELETE_EDGES_TO_ID = (
-    "FOR e IN @@coll FILTER e._to == @id REMOVE e IN @@coll"
-)
-
-# For delete_relationship tool
-Q_CASCADE_DELETE_RELATIONSHIP = (
-    "FOR e IN @@coll FILTER e._from == @from AND e._to == @to REMOVE e IN @@coll"
-)
-
-Q_CASCADE_DELETE_PERFORMEDBY_TO_PLANNER = """
-FOR e IN performedBy
-  FILTER e._to == @id
-  LET wo = DOCUMENT(e._from)
-  FILTER wo.generatedByPlanner == true
-  REMOVE e IN performedBy
-"""
-
-# ---------------------------------------------------------------------------
-# Planning dashboard — technician roster
-# ---------------------------------------------------------------------------
-
-Q_ALL_TECHNICIANS = """
-FOR t IN technicians
-  SORT t.homeBase ASC, t.name ASC
   RETURN {
-    id: t._key,
-    name: t.name,
-    homeBase: t.homeBase,
-    certifications: t.certifications
+    content:          CONCAT(entity.entity_name, ": ", entity.description),
+    entity_name:      entity.entity_name,
+    entity_type:      entity.entity_type,
+    description:      entity.description,
+    chunks:           entity_chunks,
+    related_entities: related_entities
+  }
+"""
+
+# Structured fleet graph: engine -> aircraft, degrading subsystems, required
+# parts (with blocking flag), certified technicians at the aircraft's base and
+# the most recent historical work orders. Used by both fleet tools; the
+# fleet-status tool sets @degraded_only = true to drop healthy engines.
+# Edge directions (see Q_ENGINE_IMPACT):
+#   installedOn  engine -> aircraft      (OUTBOUND from engine)
+#   partOf       subsystem -> engine     (INBOUND  to engine)
+#   requiredBy   part -> subsystem       (INBOUND  to subsystem)
+#   certifiedFor technician -> subsystem (INBOUND  to subsystem)
+#   maintains    workOrder -> engine     (INBOUND  to engine)
+Q_TOOL_FLEET_EXPAND = """
+LET nodes = @nodes
+FOR engineId IN nodes
+  LET eng = DOCUMENT(engineId)
+  FILTER eng != null
+  FILTER NOT @degraded_only OR eng.riskBucket IN ["critical", "warning"]
+  SORT eng.predictedRUL ASC
+  LET ac = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
+  LET degradingSubs = (
+    FOR sub IN 1..1 INBOUND eng partOf
+      FILTER sub.name IN eng.driverSubsystems
+      RETURN sub
+  )
+  LET allParts = (
+    FOR sub IN degradingSubs
+      FOR part IN 1..1 INBOUND sub requiredBy
+        RETURN DISTINCT {
+          name:          part.name,
+          subsystemType: part.subsystemType,
+          stockLevel:    part.stockLevel,
+          leadTimeDays:  part.leadTimeDays,
+          blocking:      part.stockLevel == 0
+        }
+  )
+  // Blocking (zero-stock) parts first so @max_parts never hides them.
+  LET parts = (FOR p IN allParts SORT p.blocking DESC, p.name LIMIT @max_parts RETURN p)
+  LET techs = (
+    FOR sub IN degradingSubs
+      FOR tech IN 1..1 INBOUND sub certifiedFor
+        FILTER tech.homeBase == ac.base
+        COLLECT name = tech.name, homeBase = tech.homeBase, certs = tech.certifications
+        SORT name
+        LIMIT @max_techs
+        RETURN { name: name, homeBase: homeBase, certifications: certs }
+  )
+  LET recent_wos = (
+    FOR wo IN 1..1 INBOUND eng maintains
+      SORT wo.date DESC
+      LIMIT @max_wos
+      RETURN { key: wo._key, date: wo.date, description: wo.description, status: wo.status }
+  )
+  LET content = CONCAT(
+    "Engine ", eng._key, " — ", eng.model,
+    " | Risk: ", eng.riskBucket,
+    " | Health: ", TO_STRING(ROUND(eng.healthIndex * 100)), "%",
+    " | RUL: ", TO_STRING(eng.predictedRUL), " cycles",
+    " | Aircraft: ", ac.tailNumber, " (", ac.base, ")",
+    " | Degrading subsystems: ", CONCAT_SEPARATOR(", ", eng.driverSubsystems),
+    " | Notes: ", eng.technicianNotes
+  )
+  RETURN {
+    content:             content,
+    engineId:            eng._key,
+    model:               eng.model,
+    riskBucket:          eng.riskBucket,
+    predictedRUL:        eng.predictedRUL,
+    healthIndex:         eng.healthIndex,
+    driverSubsystems:    eng.driverSubsystems,
+    technicianNotes:     eng.technicianNotes,
+    aircraft:            { tailNumber: ac.tailNumber, base: ac.base },
+    degradingSubsystems: (FOR s IN degradingSubs RETURN s.name),
+    blockingParts:       (FOR p IN allParts FILTER p.blocking RETURN p),
+    parts:               parts,
+    technicians:         techs,
+    recentWorkOrders:    recent_wos
   }
 """

@@ -13,6 +13,7 @@ Idempotent: if all 100 engines already carry a `notesEmbedding` field the
 script exits immediately without making any OpenAI API calls.
 """
 
+import os
 import random
 import time
 from typing import Any
@@ -21,11 +22,16 @@ from dotenv import load_dotenv
 
 load_dotenv(".env.local", override=True)
 
+from backend.aql import Q_EMBED_COUNT_EMBEDDED, Q_EMBED_ENGINES_FOR_NOTES  # noqa: E402
 from backend.db import get_db  # noqa: E402
 
-_EMBED_MODEL = "text-embedding-3-small"
-_EMBED_DIM = 1536
+# Must match the embedding model configured on the AutoRAG retriever, otherwise
+# the retriever's query vectors and these note vectors live in different spaces.
+_EMBED_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 _ENGINE_COUNT = 100
+# Name the Custom Retriever looks for (idx_vector_{collection}_{field}), so
+# auto_create_indexes finds this index instead of building a second one.
+_VECTOR_INDEX_NAME = "idx_vector_engines_notesEmbedding"
 
 # ---------------------------------------------------------------------------
 # Note templates — one bucket per risk level
@@ -137,8 +143,8 @@ def _generate_note(engine: dict[str, Any], rng: random.Random) -> str:
 # Vector index helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_vector_index(db: Any) -> None:
-    """Create an HNSW vector index on engines.notesEmbedding if absent."""
+def _ensure_vector_index(db: Any, dimension: int) -> None:
+    """Create a cosine vector index on engines.notesEmbedding if absent."""
     col = db.collection("engines")
     existing = col.indexes()
     if any(idx.get("type") == "vector" for idx in existing):
@@ -146,14 +152,15 @@ def _ensure_vector_index(db: Any) -> None:
         return
     col.add_index({
         "type": "vector",
+        "name": _VECTOR_INDEX_NAME,
         "fields": ["notesEmbedding"],
         "params": {
             "metric": "cosine",
-            "dimension": _EMBED_DIM,
+            "dimension": dimension,
             "nLists": 2,
         },
     })
-    print(f"  Vector index created on engines.notesEmbedding (cosine, {_EMBED_DIM}-dim).")
+    print(f"  Vector index {_VECTOR_INDEX_NAME} created (cosine, {dimension}-dim).")
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +177,7 @@ def embed_and_writeback() -> int:
     db = get_db()
 
     # Idempotency: count engines that already have an embedding
-    cursor = db.aql.execute(
-        "FOR e IN engines FILTER HAS(e, 'notesEmbedding') "
-        "COLLECT WITH COUNT INTO n RETURN n"
-    )
+    cursor = db.aql.execute(Q_EMBED_COUNT_EMBEDDED)
     already = next(iter(cursor), 0)
     if already >= _ENGINE_COUNT:
         print(f"All {_ENGINE_COUNT} engines already embedded — nothing to do.")
@@ -181,11 +185,10 @@ def embed_and_writeback() -> int:
 
     print(f"  {already}/{_ENGINE_COUNT} engines embedded — generating the rest.")
 
-    # Fetch scored engine docs (need riskBucket, driverSubsystems etc.)
-    cursor = db.aql.execute(
-        "FOR e IN engines RETURN KEEP(e, ['_key', 'model', 'entryIntoService', "
-        "'healthIndex', 'riskBucket', 'driverSensors', 'driverSubsystems'])"
-    )
+    # Fetch scored engine docs (need riskBucket, driverSubsystems etc.).
+    # SORT is required for determinism: the seeded rng below is consumed in
+    # this order, so an unordered scan would assign different notes per run.
+    cursor = db.aql.execute(Q_EMBED_ENGINES_FOR_NOTES)
     engines = list(cursor)
     if not engines:
         raise RuntimeError(
@@ -216,7 +219,7 @@ def embed_and_writeback() -> int:
     db.collection("engines").import_bulk(updates, on_duplicate="update")
     print(f"  Updated {len(updates)} engine documents.")
 
-    _ensure_vector_index(db)
+    _ensure_vector_index(db, dimension=len(ordered[0].embedding))
     return len(updates)
 
 

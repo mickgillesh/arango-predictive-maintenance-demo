@@ -1,5 +1,4 @@
 """Endpoint tests for Phase 3 — run against the loaded + scored database."""
-import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
@@ -143,28 +142,3 @@ def test_health_db_is_ok() -> None:
     data = r.json()
     assert data["db"] == "ok"
     assert data["version"] is not None
-
-
-# ---------------------------------------------------------------------------
-# GET /api/suggestions
-# ---------------------------------------------------------------------------
-
-def test_suggestions_non_empty() -> None:
-    r = client.get("/api/suggestions")
-    assert r.status_code == 200
-    suggestions = r.json()
-    assert isinstance(suggestions, list)
-    assert len(suggestions) >= 4
-
-
-# ---------------------------------------------------------------------------
-# POST /api/ask
-# ---------------------------------------------------------------------------
-
-def test_ask_returns_graceful_response_when_not_configured() -> None:
-    r = client.post("/api/ask", json={"question": "Which engines are critical?"})
-    assert r.status_code == 200
-    data = r.json()
-    # Either a real answer or a graceful error — never a 500
-    assert "answer" in data
-    assert data.get("error") in (None, "service_not_configured", "service_unavailable")

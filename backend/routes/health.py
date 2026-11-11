@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 from backend.aql import Q_HEALTH_CHECK
 from backend.db import get_db
-import backend.txt2aql as txt2aql_client
 
 router = APIRouter()
 
@@ -11,7 +10,6 @@ router = APIRouter()
 class HealthResponse(BaseModel):
     status: str
     db: str
-    txt2aql: str
     version: str | None = None
 
 
@@ -25,7 +23,5 @@ async def health() -> HealthResponse:
     except Exception:
         db_status = "down"
 
-    t2a_status = await txt2aql_client.health()
-
     overall = "ok" if db_status == "ok" else "error"
-    return HealthResponse(status=overall, db=db_status, txt2aql=t2a_status, version=version)
+    return HealthResponse(status=overall, db=db_status, version=version)
