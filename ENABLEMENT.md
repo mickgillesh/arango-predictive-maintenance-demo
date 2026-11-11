@@ -54,7 +54,7 @@ result of the dry run so there are no surprises live.
 | 1 | Python version; GitHub reachable | §0, §1 | |
 | 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
 | 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | **`Tools`** (shared by all projects in the database), verified 2026-11-11 |
-| 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | Custom tools run, but **the AQL expansion output did not reach the LLM** (dry run 2026-11-11: the answer is built from the raw search-hit documents; expansion errors are not reported in `failed_tools`). Open with the AI Suite team; see below |
+| 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | Custom tools run, but **the AQL expansion output did not reach the LLM** (dry run 2026-11-11: the answer is built from the raw search-hit documents; expansion errors are not reported in `failed_tools`). To raise with the AI Suite team; see below |
 | 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | **No `partition_id` needed, but `auto_select_partitions: false` is required**: with the default, the fleet tools retrieve nothing (verified 2026-11-11) |
 | 6 | `ingest(incremental=True)` accepts a new file in the already-built category | §8 (falls back to a new category) | |
 | 7 | `FPS_RECOVERY_USERNAME` accepted | §5 deploy | |
@@ -142,7 +142,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 - **Custom tool expansion (open issue, dry run 2026-11-11):** the fleet tools' AQL expansion
   (aircraft, blocking parts, technicians) did not reach the LLM. Probes with marker values
   in every field shape showed the answer is built from the raw search-hit documents only.
-  Expansion AQL errors are also not reported in `failed_tools`. Raised with the AI Suite team.
+  Expansion AQL errors are also not reported in `failed_tools`. To raise with the AI Suite team.
 
 ### §8 Incremental update
 - Scenario: EASA issues an emergency AD (`AD-EASA-2026-0214`) that supersedes
