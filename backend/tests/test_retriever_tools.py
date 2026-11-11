@@ -48,6 +48,23 @@ def test_template_uses_nodes(tool) -> None:
 
 
 @pytest.mark.parametrize("tool", TOOLS, ids=lambda t: t["tool_id"])
+def test_template_declares_every_retriever_param(tool) -> None:
+    """The Retriever binds @nodes, @@relations_collection and @top_k into every
+    expansion; a template that does not declare all three fails (ERR 1552) and the
+    tool silently degrades to plain search hits."""
+    used = template_bind_params(tool["config"]["aql_config"]["template"])
+    assert RETRIEVER_BIND_PARAMS <= used, (tool["tool_id"], RETRIEVER_BIND_PARAMS - used)
+    assert not RETRIEVER_BIND_PARAMS & set(tool["config"]["aql_config"]["bind_params"])
+
+
+def test_fleet_tools_disable_partition_auto_selection() -> None:
+    fleet = [t for t in TOOLS if t["config"]["collection"] == "engines"]
+    assert fleet and all(t["config"]["auto_select_partitions"] is False for t in fleet)
+    docs = [t for t in TOOLS if t["config"]["collection"] != "engines"]
+    assert all("auto_select_partitions" not in t["config"] for t in docs)
+
+
+@pytest.mark.parametrize("tool", TOOLS, ids=lambda t: t["tool_id"])
 def test_bind_params_match_template(tool) -> None:
     aql = tool["config"]["aql_config"]
     used = template_bind_params(aql["template"]) - RETRIEVER_BIND_PARAMS
@@ -115,6 +132,10 @@ def test_templates_parse(db, template) -> None:
     db.aql.validate(template)
 
 
+# What the Retriever binds on top of the tool's own bind_params.
+INJECTED = {"@relations_collection": "installedOn", "top_k": 10}
+
+
 def _critical_ids(db) -> list[str]:
     return list(db.aql.execute(
         "FOR e IN engines FILTER e.riskBucket == 'critical' RETURN e._id"))
@@ -124,7 +145,8 @@ def test_fleet_expand_returns_engine_context(db) -> None:
     ids = _critical_ids(db)
     assert ids
     rows = list(db.aql.execute(Q_TOOL_FLEET_EXPAND, bind_vars={
-        "nodes": ids, "degraded_only": True, "max_parts": 5, "max_techs": 3, "max_wos": 2}))
+        "nodes": ids, **INJECTED,
+        "degraded_only": True, "max_parts": 5, "max_techs": 3, "max_wos": 2}))
     assert len(rows) == len(ids)
     ruls = [r["predictedRUL"] for r in rows]
     assert ruls == sorted(ruls)
@@ -139,21 +161,35 @@ def test_fleet_expand_never_limits_away_blocking_parts(db) -> None:
     """With max_parts=1, every blocking part must still be reported and listed first."""
     ids = _critical_ids(db)
     rows = list(db.aql.execute(Q_TOOL_FLEET_EXPAND, bind_vars={
-        "nodes": ids, "degraded_only": True, "max_parts": 1, "max_techs": 1, "max_wos": 1}))
+        "nodes": ids, **INJECTED,
+        "degraded_only": True, "max_parts": 1, "max_techs": 1, "max_wos": 1}))
     for r in rows:
         assert len(r["parts"]) <= 1
         if r["blockingParts"]:
             assert r["parts"][0]["blocking"] is True
     full = list(db.aql.execute(Q_TOOL_FLEET_EXPAND, bind_vars={
-        "nodes": ids, "degraded_only": True, "max_parts": 50, "max_techs": 1, "max_wos": 1}))
+        "nodes": ids, **INJECTED,
+        "degraded_only": True, "max_parts": 50, "max_techs": 1, "max_wos": 1}))
     assert [r["blockingParts"] for r in rows] == [r["blockingParts"] for r in full]
 
 
 def test_fleet_expand_degraded_only_drops_healthy(db) -> None:
     healthy = list(db.aql.execute(
         "FOR e IN engines FILTER e.riskBucket == 'healthy' LIMIT 3 RETURN e._id"))
-    params = {"nodes": healthy, "max_parts": 1, "max_techs": 1, "max_wos": 1}
+    params = {"nodes": healthy, **INJECTED, "max_parts": 1, "max_techs": 1, "max_wos": 1}
     assert list(db.aql.execute(Q_TOOL_FLEET_EXPAND,
                                bind_vars={**params, "degraded_only": True})) == []
     assert len(list(db.aql.execute(Q_TOOL_FLEET_EXPAND,
                                    bind_vars={**params, "degraded_only": False}))) == 3
+
+
+def test_fleet_expand_accepts_keys_and_respects_top_k(db) -> None:
+    ids = _critical_ids(db)
+    keys = [i.split("/")[1] for i in ids]
+    params = {**INJECTED, "degraded_only": True, "max_parts": 1, "max_techs": 1, "max_wos": 1}
+    by_id = list(db.aql.execute(Q_TOOL_FLEET_EXPAND, bind_vars={"nodes": ids, **params}))
+    by_key = list(db.aql.execute(Q_TOOL_FLEET_EXPAND, bind_vars={"nodes": keys, **params}))
+    assert by_id == by_key
+    one = list(db.aql.execute(Q_TOOL_FLEET_EXPAND,
+                              bind_vars={"nodes": ids, **params, "top_k": 1}))
+    assert len(one) == 1

@@ -54,8 +54,8 @@ result of the dry run so there are no surprises live.
 | 1 | Python version; GitHub reachable | §0, §1 | |
 | 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
 | 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | **`Tools`** (shared by all projects in the database), verified 2026-11-11 |
-| 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | Custom tools run, but **the AQL expansion output did not reach the LLM** (dry run 2026-11-11: the answer is built from the raw search-hit documents; expansion errors are not reported in `failed_tools`). To raise with the AI Suite team; see below |
-| 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | **No `partition_id` needed, but `auto_select_partitions: false` is required**: with the default, the fleet tools retrieve nothing (verified 2026-11-11) |
+| 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | Work. **The retriever binds `@nodes`, `@@relations_collection` and `@top_k` into every expansion**; a template must declare all three or the AQL fails and the tool silently answers from the plain search hits (`failed_tools` stays empty). Fixed in all four tools, verified 2026-11-11 |
+| 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | **No `partition_id` needed, but `auto_select_partitions: false` is required**: with the default, the fleet tools retrieve nothing (verified 2026-11-11). Now set in the fleet tools' own config |
 | 6 | `ingest(incremental=True)` accepts a new file in the already-built category | §8 (falls back to a new category) | |
 | 7 | `FPS_RECOVERY_USERNAME` accepted | §5 deploy | |
 
@@ -129,6 +129,14 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 - Blocking parts are computed before the parts list is truncated, so a zero-stock part is
   never hidden.
 - **Deep Search** lets an LLM planner pick tools by description and combine results.
+- **The template contract (learned the hard way in the dry run).** The retriever binds
+  `@nodes`, `@@relations_collection` and `@top_k` into every expansion. ArangoDB rejects a
+  bind parameter the query does not declare, so a template that leaves one out fails, and
+  the retriever then **silently falls back to the plain search hits**: no error, nothing in
+  `failed_tools`, just a thinner answer. Our first fleet tool answered from the raw engine
+  documents (no aircraft, no blocking parts) for exactly this reason. Show the §7 expansion
+  check: it runs every tool the way the retriever does, so a broken template shows up as an
+  error, and `test_retriever_tools.py` enforces the contract offline.
 
 ### §7 The `partition_id` question
 - **Before:** an earlier deployment copied the AutoGraph partition id onto every engine
@@ -137,12 +145,13 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 - **Now:** removed, as the technical team advised, and verified on the cluster: no data
   changes are needed. What *is* needed is `auto_select_partitions: false` on requests that
   use tools over non-AutoGraph collections. With the default, partition auto-selection only
-  considers AutoGraph partitions and the fleet tools retrieve nothing. The §7 check reads
-  the retrieved engine ids from the answer's metadata and sets the flag for the rest of §7.
-- **Custom tool expansion (open issue, dry run 2026-11-11):** the fleet tools' AQL expansion
-  (aircraft, blocking parts, technicians) did not reach the LLM. Probes with marker values
-  in every field shape showed the answer is built from the raw search-hit documents only.
-  Expansion AQL errors are also not reported in `failed_tools`. To raise with the AI Suite team.
+  considers AutoGraph partitions and the fleet tools retrieve nothing. The fleet tools now
+  set `auto_select_partitions: false` in their **own config** (a documented per-tool field),
+  so no request flag is needed and Deep Search can still mix them with the document tools,
+  which leave it unset. The §7 check confirms this from the answer's metadata.
+- **Worth feeding back to the AI Suite team:** expansion failures are silent (no entry in
+  `failed_tools`), and the docs' airport example declares neither `@@relations_collection`
+  nor `@top_k`, so it would hit the same fallback.
 
 ### §8 Incremental update
 - Scenario: EASA issues an emergency AD (`AD-EASA-2026-0214`) that supersedes

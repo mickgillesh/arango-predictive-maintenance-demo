@@ -39,8 +39,11 @@ KG_TOOL_ID = "aerofleet_kg_entities_v1"
 FLEET_ENGINE_TOOL_ID = "aerofleet_fleet_engine_v2"
 FLEET_STATUS_TOOL_ID = "aerofleet_fleet_status_v5"
 
-# Bind parameters the Retriever supplies itself; tools must not default them.
-RETRIEVER_BIND_PARAMS = {"nodes", "@relations_collection"}
+# Bind parameters the Retriever always supplies (verified on the platform,
+# 2026-11-11). Every template must reference all of them, or ArangoDB rejects the
+# query and the Retriever silently falls back to the plain search hits. Tools
+# must not give them defaults in bind_params.
+RETRIEVER_BIND_PARAMS = {"nodes", "@relations_collection", "top_k"}
 
 _SUFFIXES = ("Chunks", "Documents", "Relations", "Entities")
 
@@ -209,6 +212,9 @@ def build_fleet_tools() -> list[dict[str, Any]]:
                     "tail and base, degrading subsystems, blocking parts, technicians at the "
                     "same base, recent work orders."
                 ),
+                # Structured data is not in any AutoGraph partition; with automatic
+                # partition selection the tool retrieves nothing (verified 2026-11-11).
+                "auto_select_partitions": False,
                 "aql_config": {
                     "template": expand,
                     "relations_collection": "installedOn",
@@ -240,6 +246,9 @@ def build_fleet_tools() -> list[dict[str, Any]]:
                     "RUL, aircraft and base, degrading subsystems, blocking parts (stock 0), "
                     "technicians at the same base. End with an overall fleet risk summary."
                 ),
+                # Structured data is not in any AutoGraph partition; with automatic
+                # partition selection the tool retrieves nothing (verified 2026-11-11).
+                "auto_select_partitions": False,
                 "aql_config": {
                     "template": expand,
                     "relations_collection": "installedOn",

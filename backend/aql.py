@@ -190,14 +190,20 @@ Q_CLEAR_COLLECTION = "FOR doc IN @@coll REMOVE doc IN @@coll"
 #   1. search  — lexical / semantic / hybrid search over the tool's collection
 #   2. expand  — this AQL, with @nodes = the _ids found in stage 1
 #   3. cite    — the Retriever formats the returned rows (and citations)
-# @nodes and @@relations_collection are supplied by the Retriever; every other
-# bind parameter has a default in the tool's config.aql_config.bind_params.
+# The Retriever ALWAYS binds @nodes, @@relations_collection (from
+# aql_config.relations_collection) and @top_k (from config.top_k), so every
+# template must reference all three: ArangoDB rejects a bind parameter the query
+# does not declare (ERR 1552). When the AQL fails, the Retriever silently falls
+# back to the plain search hits; nothing appears in failed_tools (verified on the
+# platform, 2026-11-11). Every other bind parameter has a default in the tool's
+# config.aql_config.bind_params.
 # ---------------------------------------------------------------------------
 
 # Unstructured docs: AutoGraph chunk -> PART_OF -> source document.
 Q_TOOL_TECHDOCS = """
 LET nodes = @nodes
 FOR nodeId IN nodes
+  LIMIT @top_k
   LET chunk = DOCUMENT(nodeId)
   FILTER chunk != null
   LET source_doc = FIRST(
@@ -220,6 +226,7 @@ FOR nodeId IN nodes
 Q_TOOL_KG_ENTITIES = """
 LET nodes = @nodes
 FOR n IN nodes
+  LIMIT @top_k
   LET entity = DOCUMENT(n)
   FILTER entity != null
   LET entity_chunks = (
@@ -264,12 +271,15 @@ FOR n IN nodes
 #   maintains    workOrder -> engine     (INBOUND  to engine)
 Q_TOOL_FLEET_EXPAND = """
 LET nodes = @nodes
-FOR engineId IN nodes
-  LET eng = DOCUMENT(engineId)
+FOR node IN nodes
+  // Accept an _id ("engines/9") or a bare _key ("9").
+  LET eng = DOCUMENT(CONTAINS(node, "/") ? node : CONCAT("engines/", node))
   FILTER eng != null
   FILTER NOT @degraded_only OR eng.riskBucket IN ["critical", "warning"]
   SORT eng.predictedRUL ASC
-  LET ac = FIRST(FOR a IN 1..1 OUTBOUND eng installedOn RETURN a)
+  LIMIT @top_k
+  // @@relations_collection is installedOn (the tool's relations_collection).
+  LET ac = FIRST(FOR a IN 1..1 OUTBOUND eng @@relations_collection RETURN a)
   LET degradingSubs = (
     FOR sub IN 1..1 INBOUND eng partOf
       FILTER sub.name IN eng.driverSubsystems
