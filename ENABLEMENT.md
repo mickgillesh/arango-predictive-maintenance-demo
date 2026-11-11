@@ -109,7 +109,17 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 
 ### §6 AutoRAG
 - LOCAL for "what does X require", GLOBAL for themes, UNIFIED for mixed questions.
-- A6 (Trent 700 AD) shows the retriever separating fleet engines from distractors.
+- **Show the metadata under each answer** — it is how the retriever explains itself:
+  - LOCAL runs an **LLM planner** by default: it splits the question into sub-queries
+    (`step 1 … asked: …`) and gathers graph context for each. That is also why LOCAL is
+    the slowest mode (16-40 s in the dry run).
+  - UNIFIED lists the cited chunks; GLOBAL lists scored **support points** from the
+    community summaries (map-reduce) and which communities it read.
+  - `citations: [n] …` maps each `[n]` in the answer to the chunk (and document) it came from.
+- **A6 is the bridge to §7.** In the dry run (2026-11-11) LOCAL answered as if the
+  Trent 700 were in "your fleet": the documents describe engines but not which ones the
+  operator flies. That fact lives in the structured graph, which only the §7 custom tools
+  can reach. Use the wrong answer, don't hide it.
 
 ### §7 Custom Retriever, the key idea
 - A tool is a **document**: a collection to search, a search mode (lexical, semantic or

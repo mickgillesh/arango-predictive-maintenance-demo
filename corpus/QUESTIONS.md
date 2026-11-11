@@ -66,6 +66,10 @@ Fleet facts below assume the default deterministic load (`load → score → emb
 - No — it applies to Rolls-Royce Trent 700 engines only (LPT stage 1 blades)
 - The fleet engine models are CFM56-7B27, CFM56-5B4, V2527-A5 and PW4077D
 
+**Observed in the dry run (2026-11-11):** documents-only LOCAL retrieval answered *yes*, as
+if the Trent 700 were in the fleet — the corpus does not say which engines the operator
+flies. Expect this to fail in §6; it motivates the fleet tools in §7.
+
 ---
 
 ## B. Cross-graph questions (custom retriever tools and Deep Search, section 7)
