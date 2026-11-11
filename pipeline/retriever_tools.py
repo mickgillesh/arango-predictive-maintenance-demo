@@ -55,10 +55,15 @@ class AutographCollections:
     entities: str | None = None
 
 
-def default_tools_collection(project: str) -> str:
-    """Tools collection the Retriever reads: ``TOOLS_COLLECTION`` env var, else
-    ``{project}_Tools`` as documented. Verify on the cluster (notebook §7)."""
-    return os.environ.get("TOOLS_COLLECTION", "").strip() or f"{project}_Tools"
+def default_tools_collection() -> str:
+    """Tools collection the Retriever reads: ``TOOLS_COLLECTION`` env var, else ``Tools``.
+
+    Verified on the platform (2026-11-11): the Retriever reads the database-wide
+    ``Tools`` collection, not ``{project}_Tools`` as the docs say. It is shared
+    by every project in the database; tool ids are unique, so registering
+    upserts them against the current project's AutoGraph collections.
+    """
+    return os.environ.get("TOOLS_COLLECTION", "").strip() or "Tools"
 
 
 def discover_autograph_collections(

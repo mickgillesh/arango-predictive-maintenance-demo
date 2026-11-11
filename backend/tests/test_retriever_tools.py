@@ -72,9 +72,9 @@ def test_template_bind_params_parser() -> None:
 
 def test_default_tools_collection(monkeypatch) -> None:
     monkeypatch.delenv("TOOLS_COLLECTION", raising=False)
-    assert default_tools_collection("proj") == "proj_Tools"
-    monkeypatch.setenv("TOOLS_COLLECTION", "Tools")
-    assert default_tools_collection("proj") == "Tools"
+    assert default_tools_collection() == "Tools"
+    monkeypatch.setenv("TOOLS_COLLECTION", "Custom_Tools")
+    assert default_tools_collection() == "Custom_Tools"
 
 
 def test_discover_exact_names() -> None:

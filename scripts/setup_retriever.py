@@ -12,7 +12,7 @@ Env vars:
     ARANGO_URL, ARANGO_DB, ARANGO_USER, ARANGO_PASSWORD   database connection
     PROJECT_NAME        AutoGraph project whose collections the doc tools search
                         (the full, suffixed name the notebook printed)
-    TOOLS_COLLECTION    optional override (default "{PROJECT_NAME}_Tools")
+    TOOLS_COLLECTION    optional override (default "Tools", which the Retriever reads)
 """
 
 import os
@@ -51,7 +51,7 @@ def main() -> int:
         print("ERROR: 'engines' collection not found — run `make reset` first.")
         return 1
 
-    tools_collection = default_tools_collection(project)
+    tools_collection = default_tools_collection()
     ids = register_tools(db, tools_collection, build_tools(ag))
     print(f"Registered in {tools_collection}:")
     for tool_id in ids:

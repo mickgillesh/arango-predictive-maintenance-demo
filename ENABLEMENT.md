@@ -53,7 +53,7 @@ result of the dry run so there are no surprises live.
 |---|---|---|---|
 | 1 | Python version; GitHub reachable | §0, §1 | |
 | 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
-| 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | |
+| 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | **`Tools`** (shared by all projects in the database), verified 2026-11-11 |
 | 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | |
 | 5 | Fleet tools return engines **without** `partition_id` (or need `auto_select_partitions: false`) | §7 partition check | |
 | 6 | `ingest(incremental=True)` accepts a new file in the already-built category | §8 (falls back to a new category) | |
@@ -157,7 +157,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 | §6/§8 `PlatformUnreachableError: … did not answer within the request timeout` | A retriever query took longer than the SDK's 60 s default | §3 raises it to `REQUEST_TIMEOUT` (300 s); raise further and re-run the question. The first query after a deploy is the slowest |
 | `NameError` (e.g. `answers`, `rag`, `db`) after logging back in | Kernel restarted; variables lost, cluster state intact | Run §0 and §1, set `RESUME = True` in the Resume cell and run it, then re-run the section you were on. §6 reuses the deployed retriever |
 | §5 build very slow | LLM rate limits | Talk through the corpus and `QUESTIONS.md`; continue when done |
-| Tool queries return errors | Tools collection mismatch | The §7 check switches collection automatically; otherwise set `TOOLS_COLLECTION` |
+| Tool queries return errors | Tools registered somewhere the retriever does not read | Tools must be in the `Tools` collection (the default); check `TOOLS_COLLECTION` is unset |
 | Fleet tools return nothing | Partition selection | §7 retries with `auto_select_partitions: false`; if it still fails, stop and show the dry-run output |
 | `CategoryAlreadyBuiltError` in §8 | Service won't add to a built category | The cell falls back to a new category automatically |
 | Deep Search answer misses a fact | LLM planner variance | Run the single tools (B1, techdocs) to show the underlying data |

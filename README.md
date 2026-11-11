@@ -143,7 +143,7 @@ make tools                     # re-register retriever tools (needs PROJECT_NAME
 | `CHAT_MODEL`, `EMBEDDING_MODEL` | notebook, embed | Must match between `make embed` and AutoRAG |
 | `PROJECT_NAME` | notebook, `make tools` | AutoGraph project (auto-generated per run if unset) |
 | `FPS_RECOVERY_USERNAME` | notebook | AutoGraph File Parser recovery user |
-| `TOOLS_COLLECTION` | notebook, `make tools` | Override the Tools collection (default `{project}_Tools`) |
+| `TOOLS_COLLECTION` | notebook, `make tools` | Override the Tools collection (default `Tools`, verified on the platform) |
 | `FORCED_CRITICAL` | scorer | Pin engine ids to critical for rehearsals |
 
 See [CLAUDE.md](CLAUDE.md) for project conventions.
