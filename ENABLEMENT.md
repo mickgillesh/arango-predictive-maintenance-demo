@@ -152,6 +152,13 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 - **Worth feeding back to the AI Suite team:** expansion failures are silent (no entry in
   `failed_tools`), and the docs' airport example declares neither `@@relations_collection`
   nor `@top_k`, so it would hit the same fallback.
+- **Open issue: intermittent retrieval (dry run 2026-11-11).** Once the expansion worked,
+  identical fleet-status queries sometimes returned nothing (no `graph_metadata`), in
+  about 4 of 17 runs with the full template. Dropping the top-level `content` field from the
+  expansion rows gave 3/3, but that sample is small and a simpler template also failed 0/3,
+  so the root cause is not confirmed. The §7 check retries up to 3 times and prints the
+  attempt number. **Track the attempt numbers across dry runs**, and check the retriever
+  service logs for a failing query before raising it with the AI Suite team.
 
 ### §8 Incremental update
 - Scenario: EASA issues an emergency AD (`AD-EASA-2026-0214`) that supersedes
@@ -183,7 +190,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 | `NameError` (e.g. `answers`, `rag`, `db`) after logging back in | Kernel restarted; variables lost, cluster state intact | Run §0 and §1, set `RESUME = True` in the Resume cell and run it, then re-run the section you were on. §6 reuses the deployed retriever |
 | §5 build very slow | LLM rate limits | Talk through the corpus and `QUESTIONS.md`; continue when done |
 | Tool queries return errors | Tools registered somewhere the retriever does not read | Tools must be in the `Tools` collection (the default); check `TOOLS_COLLECTION` is unset |
-| Fleet tools return nothing | Partition selection | §7 retries with `auto_select_partitions: false`; if it still fails, stop and show the dry-run output |
+| Fleet tools return nothing | Partition selection, or the intermittent retrieval issue (see §7 talking points) | The §7 check retries automatically; for later cells just re-run. If it never succeeds, stop and show the dry-run output |
 | `CategoryAlreadyBuiltError` in §8 | Service won't add to a built category | The cell falls back to a new category automatically |
 | Deep Search answer misses a fact | LLM planner variance | Run the single tools (B1, techdocs) to show the underlying data |
 

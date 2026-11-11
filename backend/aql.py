@@ -313,17 +313,10 @@ FOR node IN nodes
       LIMIT @max_wos
       RETURN { key: wo._key, date: wo.date, description: wo.description, status: wo.status }
   )
-  LET content = CONCAT(
-    "Engine ", eng._key, " — ", eng.model,
-    " | Risk: ", eng.riskBucket,
-    " | Health: ", TO_STRING(ROUND(eng.healthIndex * 100)), "%",
-    " | RUL: ", TO_STRING(eng.predictedRUL), " cycles",
-    " | Aircraft: ", ac.tailNumber, " (", ac.base, ")",
-    " | Degrading subsystems: ", CONCAT_SEPARATOR(", ", eng.driverSubsystems),
-    " | Notes: ", eng.technicianNotes
-  )
+  // No top-level `content` field: in the dry run (2026-11-11) rows with one were
+  // intermittently dropped by the Retriever (retrieved 1/3 vs 3/3 without it;
+  // small sample, root cause unconfirmed).
   RETURN {
-    content:             content,
     engineId:            eng._key,
     model:               eng.model,
     riskBucket:          eng.riskBucket,

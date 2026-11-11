@@ -151,7 +151,7 @@ def test_fleet_expand_returns_engine_context(db) -> None:
     ruls = [r["predictedRUL"] for r in rows]
     assert ruls == sorted(ruls)
     for r in rows:
-        assert r["content"].startswith("Engine ")
+        assert "content" not in r  # see the note in Q_TOOL_FLEET_EXPAND
         assert r["aircraft"]["tailNumber"]
         assert r["degradingSubsystems"]
     assert any(r["blockingParts"] for r in rows)
