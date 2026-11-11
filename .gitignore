@@ -12,9 +12,11 @@ __pycache__/
 dist/
 .ruff_cache/
 
-# data (download separately)
-data/
+# data: only the C-MAPSS FD001 training file is committed (NASA public domain;
+# its download URL is gone). Everything else under data/ stays local.
+data/*
 !data/.gitkeep
+!data/train_FD001.txt
 
 # frontend
 frontend/node_modules/

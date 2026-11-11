@@ -32,7 +32,7 @@ notebooks/
   aerofleet_autograph_autorag.ipynb   end-to-end session notebook (runs on the platform)
   nb_helpers.py            REST helper for custom tools / Deep Search, display helpers
 pipeline/
-  download_data.py         NASA C-MAPSS FD001 download
+  download_data.py         locates the committed C-MAPSS FD001 file (data/train_FD001.txt)
   synthetic_graph.py       deterministic operational graph (seed 42)
   loader.py                creates collections + fleetGraph (destructive, "aerofleet" DBs only)
   scorer.py, scorer_runner.py   health index → predicted RUL, risk bucket, driver subsystems

@@ -1,4 +1,10 @@
-"""Download the NASA C-MAPSS FD001 training file into data/."""
+"""Provide the NASA C-MAPSS FD001 training file at data/train_FD001.txt.
+
+The file is committed to the repo (NASA data, public domain), so this normally
+just returns its path. The download is a fallback only: NASA retired the old
+Open Data Portal link (it returns 404), so a missing file usually means the
+repo was not cloned completely.
+"""
 import io
 import pathlib
 import zipfile
@@ -8,7 +14,8 @@ import requests
 DATA_DIR = pathlib.Path("data")
 FD001_PATH = DATA_DIR / "train_FD001.txt"
 
-# NASA Open Data Portal — CMAPSS Jet Engine Simulated Data (ff5v-kuh6)
+# Legacy NASA Open Data Portal link (ff5v-kuh6). Returns 404 since 2026; kept as a
+# fallback in case it is restored.
 NASA_URL = "https://data.nasa.gov/download/ff5v-kuh6/application%2Fzip"
 
 
@@ -47,7 +54,9 @@ def ensure_fd001() -> pathlib.Path:
 
 def _manual_instructions(reason: str) -> None:
     print(f"\nERROR: Could not download C-MAPSS FD001: {reason}")
-    print("Please download the dataset manually and place train_FD001.txt in data/")
+    print("train_FD001.txt is committed to the repo; restore it with")
+    print("  git checkout -- data/train_FD001.txt")
+    print("or download the dataset manually and place train_FD001.txt in data/")
     print("Sources:")
     print("  NASA:   https://data.nasa.gov/Aerospace/CMAPSS-Jet-Engine-Simulated-Data/ff5v-kuh6")
     print("  Kaggle: https://www.kaggle.com/datasets/behrad3d/nasa-cmaps")

@@ -18,8 +18,8 @@ on the platform notebook server of a fresh cluster. Answer key:
 - [ ] Fresh cluster with the AI Suite enabled; you can log in to the web UI.
 - [ ] Notebook server kernel is **Python 3.12+**: `import sys; sys.version`. If it is
       3.11, create a 3.12 kernel (below).
-- [ ] Notebook server can reach `github.com` (repo + SDK) and `data.nasa.gov` (C-MAPSS).
-      If NASA is blocked, upload `train_FD001.txt` to `data/` in the cloned repo.
+- [ ] Notebook server can reach `github.com` (repo + SDK). The C-MAPSS telemetry is
+      committed in `data/train_FD001.txt`, so NASA access is not needed.
 - [ ] A database user with permission to create databases (for `aerofleet_enablement`).
 - [ ] A user for `FPS_RECOVERY_USERNAME` with read/write on the database. The SDK does
       not create it. Using the same user as `ARANGO_USER` is fine for a demo.
@@ -51,7 +51,7 @@ result of the dry run so there are no surprises live.
 
 | # | Question | Where checked | Result |
 |---|---|---|---|
-| 1 | Python version; GitHub and NASA reachable | §0, §1, §2 | |
+| 1 | Python version; GitHub reachable | §0, §1 | |
 | 2 | AutoGraph collection names for an SDK project (one set, or one per partition?) | §5 "What AutoGraph created" | |
 | 3 | Which Tools collection the retriever reads (`{project}_Tools` or `Tools`) | §7 first check | |
 | 4 | Custom (`query_type` 4) and Deep Search (`4` + `use_llm_planner`) work as expected | §7 | |
@@ -150,7 +150,7 @@ Note on query types (from the SDK's `retrievers.proto`): `GLOBAL = 1`, `LOCAL = 
 | §0 asserts "needs Python 3.12+" | Server default kernel is 3.11 | Create the 3.12 kernel (section 1) and switch to it |
 | §1: "No module named pip" | Kernel venv created without `--seed` | `python -m uv pip install --python ~/.venvs/aerofleet312/bin/python pip`; restart kernel |
 | §1 SDK install fails | No GitHub access | `pip download` the SDK on a laptop and upload the wheel |
-| C-MAPSS download fails | NASA blocked | Upload `train_FD001.txt` to `data/` in the repo folder; re-run §2 |
+| §2 "Could not download C-MAPSS FD001" | `data/train_FD001.txt` missing from the clone | `git checkout -- data/train_FD001.txt` (or upload it to `data/`); re-run §2 |
 | §2 `CERTIFICATE_VERIFY_FAILED: self-signed certificate` | Cluster CA not trusted (§0 uses `ARANGO_DEPLOYMENT_CA` by default) | Check `echo $ARANGO_DEPLOYMENT_CA` in a terminal; otherwise set `ARANGO_TLS_VERIFY=false` in §0 and re-run from §0 |
 | `ensure_database()` permission error | User cannot create databases | Create `aerofleet_enablement` in the web UI; re-run |
 | AutoGraph deploy rejected | `FPS_RECOVERY_USERNAME` missing or without rights | Create the user / grant rw; re-run deploy |
