@@ -154,20 +154,35 @@ def embedding_dimensions() -> int:
     return int(os.environ.get("EMBEDDING_DIMENSIONS") or _DEFAULT_DIMENSIONS)
 
 
-def _ensure_vector_index(db: Any, dimension: int) -> None:
-    """Create the cosine vector index on engines.notesEmbedding, replacing any
-    vector index on that field with a different dimension (a stale index makes
-    every vector query fail)."""
+def _drop_mismatched_vector_indexes(db: Any, dimension: int) -> bool:
+    """Drop vector indexes on engines.notesEmbedding whose dimension differs.
+
+    Must run BEFORE writing vectors of a new length: ArangoDB rejects a write
+    that does not fit an existing vector index (ERR 17 "type error"), and a
+    stale index makes every vector query fail. Returns True if a matching index
+    remains.
+    """
     col = db.collection("engines")
+    matching = False
     for idx in col.indexes():
         if idx.get("type") != "vector" or idx.get("fields") != ["notesEmbedding"]:
             continue
         if (idx.get("params") or {}).get("dimension") == dimension:
-            print(f"  Vector index {idx.get('name')} already present ({dimension}-dim).")
-            return
+            matching = True
+            continue
         col.delete_index(idx["id"].split("/")[-1])
         print(f"  Dropped vector index {idx.get('name')} "
               f"({(idx.get('params') or {}).get('dimension')}-dim).")
+    return matching
+
+
+def _ensure_vector_index(db: Any, dimension: int) -> None:
+    """Create the cosine vector index on engines.notesEmbedding unless a matching
+    one exists (mismatched ones are dropped first)."""
+    col = db.collection("engines")
+    if _drop_mismatched_vector_indexes(db, dimension):
+        print(f"  Vector index already present ({dimension}-dim).")
+        return
     col.add_index({
         "type": "vector",
         "name": _VECTOR_INDEX_NAME,
@@ -239,6 +254,7 @@ def embed_and_writeback(dimensions: int | None = None) -> int:
         for i in range(len(engines))
     ]
 
+    _drop_mismatched_vector_indexes(db, dimensions)  # before writing new-length vectors
     db.collection("engines").import_bulk(updates, on_duplicate="update")
     print(f"  Updated {len(updates)} engine documents.")
 
