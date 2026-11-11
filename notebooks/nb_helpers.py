@@ -13,6 +13,7 @@ Query types (from the SDK's retrievers.proto):
 
 from __future__ import annotations
 
+import json
 import ssl
 import textwrap
 import time
@@ -59,7 +60,7 @@ def graphrag_query(
     use_llm_planner: bool | None = None,
     auto_select_partitions: bool | None = None,
     auto_create_indexes: bool | None = True,
-    include_metadata: bool = False,
+    include_metadata: bool = True,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
     """POST a query to ``{retriever_url}/v1/graphrag-query`` and return the JSON body.
@@ -81,8 +82,33 @@ def graphrag_query(
     return resp.json()
 
 
-def show(title: str, answer: Any, width: int = 100, max_chars: int = 4000) -> None:
-    """Print an answer (SDK response object, REST dict or string) under a heading."""
+def metadata_of(answer: Any) -> Any:
+    """The retriever's metadata for an answer (requested with ``include_metadata``).
+
+    The service returns it as a string, usually JSON; it is parsed when possible
+    and returned as-is otherwise. ``None`` when the answer carries none.
+    """
+    raw = answer.get("metadata") if isinstance(answer, dict) else getattr(answer, "metadata", None)
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return raw
+    return raw
+
+
+def show(
+    title: str,
+    answer: Any,
+    width: int = 100,
+    max_chars: int = 4000,
+    metadata: bool = True,
+    max_metadata_chars: int = 3000,
+) -> None:
+    """Print an answer (SDK response object, REST dict or string) under a heading,
+    followed by the retriever's metadata when present."""
     if isinstance(answer, dict):
         text = answer.get("result") or answer.get("error_message") or str(answer)
     else:
@@ -91,6 +117,14 @@ def show(title: str, answer: Any, width: int = 100, max_chars: int = 4000) -> No
     print(f"\n{'=' * width}\n{title}\n{'-' * width}")
     for para in text.split("\n"):
         print(textwrap.fill(para, width) if para.strip() else "")
+    meta = metadata_of(answer) if metadata else None
+    if meta is None:
+        return
+    keys = f" — keys: {', '.join(map(str, meta))}" if isinstance(meta, dict) else ""
+    body = meta if isinstance(meta, str) else json.dumps(meta, indent=1, default=str)
+    if len(body) > max_metadata_chars:
+        body = body[:max_metadata_chars] + f"\n… ({len(body):,} chars; metadata_of(answer) for all)"
+    print(f"{'-' * width}\nmetadata{keys}\n{body}")
 
 
 def answer_mentions(answer: Any, *needles: str) -> dict[str, bool]:
